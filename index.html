@@ -148,7 +148,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="parse.js?v=7"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
+<script src="parse.js?v=8"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
@@ -215,12 +215,14 @@
     const w = c.width = Math.round(box.w * t), h = c.height = Math.round(box.h * t);
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // transparent PNGs would otherwise read as black
-    ctx.filter = 'grayscale(1)';
     ctx.drawImage(bmp, box.x / s, box.y / s, box.w / s, box.h / s, 0, 0, w, h);
+    // Grey by hand: the canvas 'grayscale' filter made some images completely unreadable
     const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
     let sum = 0, n = 0;
     for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
-    if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
+    if (sum / n < 110) for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i];
+    ctx.putImageData(img, 0, 0);
     return c;
   }
 

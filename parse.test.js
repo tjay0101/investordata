@@ -89,4 +89,8 @@ assert.strictEqual(parseCard(`Bayerische Motoren\nBMW\nGROUP\nHanns Huber`).comp
 // 14. Phone in brackets keeps the bracket
 assert.strictEqual(parseCard(`mobile: (34) 629 873 502`).phone, '(34) 629 873 502');
 
+// 15. Email read with spaces instead of dots
+assert.strictEqual(parseCard(`Tim Shea@terra es`).email, 'tim.shea@terra.es');
+assert.strictEqual(parseCard(`E-Mail : jo@example.com`).email, 'jo@example.com'); // label before email untouched
+
 console.log('ok');

@@ -34,6 +34,10 @@ function parseCard(text) {
   for (let l of text.replace(/\s*[@©]\s*(?=[\w-]+\.)/g, '@').split('\n')) {    // OCR: "name @ x.com"
     // email/website lines: OCR adds spaces around dots ("siddharth. kinagi@x. com") and stray "_"
     if (/@|www\s*\./i.test(l)) l = l.replace(/\s*([.@])\s*_?/g, '$1');
+    if (l.includes('@')) {
+      l = l.replace(/@([\w-]+)\s+(com|net|org|in|co|es|de|fr|uk|io|au|br)\b/i, '@$1.$2');      // "@terra es" -> "@terra.es"
+      l = l.replace(/^(\p{L}{2,})\s+(\p{L}{2,}@\S+)$/u, '$1.$2');                              // "Tim Shea@x.es" -> "Tim.Shea@x.es"
+    }
     // "www thunders co kr" -> "www.thunders.co.kr" (short www line with spaces for dots)
     if (/^\W*www\s+[a-z0-9-]+(\s+[a-z]{2,4}){1,2}\W*$/i.test(l.trim())) l = l.trim().replace(/\s+/g, '.');
     l = l.replace(/[|~`'"“”‘’«»*•·]+|_(?![\w.-]*@)/g, ' ').replace(/\s+/g, ' ').trim();
