@@ -152,11 +152,26 @@
   const bar = $('progress').firstElementChild;
   let rawText = '', source = '';
 
-  // Free in-browser text reader. One worker, created at page load so the first scan is quicker.
-  // PSM 11 = "sparse text": best on cards in our tests (scattered lines, two columns).
+  // Free in-browser text reader. PSM 11 = "sparse text": best on cards in our tests.
+  // Phones run low on memory after several big photos, so the reader is restarted every few
+  // scans and after any failure, and every photo/canvas is freed right after use.
   let onProgress = () => {};
-  const worker = Tesseract.createWorker('eng', 1, { logger: m => m.status === 'recognizing text' && onProgress(m.progress) })
-    .then(async w => { await w.setParameters({ tessedit_pageseg_mode: '11' }); return w; });
+  let worker = null, scansOnWorker = 0;
+  const RESTART_EVERY = 5;
+  function newWorker() {
+    return Tesseract.createWorker('eng', 1, { logger: m => m.status === 'recognizing text' && onProgress(m.progress) })
+      .then(async w => { await w.setParameters({ tessedit_pageseg_mode: '11' }); return w; });
+  }
+  async function getWorker() {
+    if (worker && scansOnWorker >= RESTART_EVERY) await dropWorker();
+    if (!worker) { worker = newWorker(); scansOnWorker = 0; }
+    try { return await worker; } catch (e) { worker = null; throw e; }
+  }
+  async function dropWorker() {
+    const w = worker; worker = null;
+    try { await (await w).terminate(); } catch {}
+  }
+  worker = newWorker(); // warm up so the first scan is quicker
 
   // Fix phone rotation, resize to ~1600px, greyscale. Dark cards are flipped to dark-on-light.
   // (Tested: contrast boosts and black/white thresholding made results worse, so they are left out.)
@@ -168,17 +183,33 @@
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.filter = 'grayscale(1)';
     ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close(); // free the full-size photo now
     const img = ctx.getImageData(0, 0, w, h), d = img.data;
-    let sum = 0, n = 0;
+    let sum = 0, n = 0, lo = 255, hi = 0;
     for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
+    for (let i = 0; i < d.length; i += 64) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
+    // A completely flat image means the phone gave us a blank canvas (out of memory), not a real photo
+    if (hi - lo < 8) { freeCanvas(c); throw new Error('blank image'); }
     if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
     return c;
+  }
+  const freeCanvas = c => { c.width = c.height = 0; }; // iPhones only free canvas memory this way
+
+  async function readOnce(file) {
+    const w = await getWorker();
+    const c = await prepImage(file);
+    try { return (await w.recognize(c)).data.text; }
+    finally { freeCanvas(c); scansOnWorker++; }
   }
 
   async function readCard(file) {
     onProgress = p => bar.style.width = Math.max(5, p * 100) + '%';
-    const { data } = await (await worker).recognize(await prepImage(file));
-    rawText = data.text;
+    try { rawText = await readOnce(file); }
+    catch (err) { // low memory / crashed reader: start a fresh one and try once more
+      console.warn('Scan failed, retrying with a fresh reader', err);
+      await dropWorker();
+      rawText = await readOnce(file);
+    }
     return parseCard(rawText);
   }
 
@@ -196,6 +227,7 @@
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    if ($('preview').src.startsWith('blob:')) URL.revokeObjectURL($('preview').src); // free previous photo
     $('preview').src = URL.createObjectURL(file);
     $('preview').style.display = 'block';
     $('progress').style.display = 'block'; bar.style.width = '5%';
@@ -204,12 +236,13 @@
     try {
       const fields = await readCard(file); source = 'ocr';
       for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
+      form.elements.notes.value = ''; // new card: don't carry over the last card's notes
       markFilled();
       const found = FIELDS.filter(k => fields[k]).length;
       $('status').textContent = found ? `✅ Found ${found} details. Please check before saving.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
       form.scrollIntoView({ behavior: 'smooth' });
     } catch (err) {
-      $('status').textContent = '❌ Could not read card: ' + err.message;
+      $('status').textContent = '❌ Could not read this photo. Please take it again' + (/blank|memory/i.test(err.message) ? ' (if it keeps failing, close and reopen the app)' : '') + '.';
     } finally {
       $('progress').style.display = 'none';
     }
