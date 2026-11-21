@@ -176,7 +176,8 @@ function findCard({ data, width: W, height: H }) {
 // How good is a reading? Found fields count most; confidence breaks ties.
 function scoreReading(fields, confidence) {
   return (fields.email ? 3 : 0) + (fields.phone ? 3 : 0) + (fields.name ? 2 : 0) + (fields.designation ? 1 : 0)
-    + (fields.company ? 1 : 0) + (fields.website ? 1 : 0) + confidence / 100;
+    + (fields.company ? 1 : 0) + (fields.website ? 1 : 0)
+    + confidence / 20;   // 0-5: a wrong rotation reads junk with low confidence, even if the junk looks like a name
 }
 
 if (typeof module !== 'undefined') module.exports = { parseCard, findCard, scoreReading };

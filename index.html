@@ -148,7 +148,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="parse.js?v=8"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
+<script src="parse.js?v=9"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
@@ -209,7 +209,7 @@
 
   // Greyscale copy of part of the photo (box in "look" coordinates, s = look scale) at 1400px;
   // dark images are flipped to dark-on-light.
-  function cutOut(bmp, box, s) {
+  function cutOut(bmp, box, s, colour = false) {
     const t = 1400 / Math.max(box.w, box.h);
     const c = document.createElement('canvas');
     const w = c.width = Math.round(box.w * t), h = c.height = Math.round(box.h * t);
@@ -217,6 +217,7 @@
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // transparent PNGs would otherwise read as black
     ctx.drawImage(bmp, box.x / s, box.y / s, box.w / s, box.h / s, 0, 0, w, h);
     // Grey by hand: the canvas 'grayscale' filter made some images completely unreadable
+    if (colour) return c; // last resort: a few images only read in colour
     const img = ctx.getImageData(0, 0, w, h), d = img.data;
     for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
     let sum = 0, n = 0;
@@ -287,6 +288,12 @@
         // read the whole photo once more in the same rotation and keep the better reading
         c = cutOut(bmp, whole, s);
         try { best = await readRotations(w, c, [best.deg], best); }
+        finally { freeCanvas(c); }
+      }
+      if (best.text.replace(/\W/g, '').length < 15) {
+        // Almost nothing read: some images only work in colour (tested on real cards)
+        c = cutOut(bmp, box ? { ...box, w: Math.min(box.w, W - box.x), h: Math.min(box.h, H - box.y) } : whole, s, true);
+        try { best = await readRotations(w, c, [best.deg || 0], best); }
         finally { freeCanvas(c); }
       }
       return { text: best.text, thumb };
