@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aquaminder Investor Scan</title>
+<style>
+  :root { --blue: #1ba1e2; --ink: #111; --line: #ddd; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: var(--ink); }
+  main { max-width: 480px; margin: 0 auto; padding: 16px; }
+  header { text-align: center; margin-bottom: 16px; }
+  header img { max-width: 220px; width: 70%; }
+  header p { margin: 4px 0 0; color: #666; font-size: 14px; }
+  .btn { display: block; width: 100%; padding: 14px; border: 0; border-radius: 8px; background: var(--blue); color: #fff; font-size: 16px; text-align: center; cursor: pointer; }
+  .btn:disabled { opacity: .5; }
+  .btn.light { background: #eee; color: var(--ink); }
+  #preview { width: 100%; margin: 12px 0; border-radius: 8px; display: none; }
+  #status { text-align: center; margin: 12px 0; min-height: 20px; color: #555; }
+  label { display: block; font-size: 13px; color: #555; margin-top: 10px; }
+  input, textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 15px; font-family: inherit; }
+  #form { display: none; }
+  .row { display: flex; gap: 8px; margin-top: 16px; }
+  .row .btn { flex: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="logo.png" alt="Aquaminder">
+    <p>Investor visiting card scanner</p>
+  </header>
+
+  <label class="btn" for="cam">📷 Scan visiting card</label>
+  <input id="cam" type="file" accept="image/*" capture="environment" hidden>
+  <img id="preview" alt="Card preview">
+  <div id="status"></div>
+
+  <form id="form">
+    <label>Name <input name="name"></label>
+    <label>Designation <input name="designation"></label>
+    <label>Company <input name="company"></label>
+    <label>Phone <input name="phone" type="tel"></label>
+    <label>Email <input name="email" type="email"></label>
+    <label>Website <input name="website"></label>
+    <label>Address <textarea name="address" rows="2"></textarea></label>
+    <label>Notes <textarea name="notes" rows="2" placeholder="Met at…, interest in…"></textarea></label>
+    <div class="row">
+      <button type="button" class="btn light" id="reset">Cancel</button>
+      <button type="submit" class="btn" id="save">Save</button>
+    </div>
+  </form>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="parse.js"></script>
+<script>
+  // Paste your Apps Script Web App URL here (see README.md)
+  const SHEET_URL = 'PASTE_APPS_SCRIPT_URL_HERE';
+  const TOKEN = 'aquaminder-2026'; // must match TOKEN in apps-script/Code.gs
+
+  const $ = id => document.getElementById(id);
+  const form = $('form');
+  let rawText = '';
+
+  $('cam').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('preview').src = URL.createObjectURL(file);
+    $('preview').style.display = 'block';
+    form.style.display = 'none';
+    $('status').textContent = 'Reading card…';
+    try {
+      const { data } = await Tesseract.recognize(file, 'eng', {
+        logger: m => m.status === 'recognizing text' && ($('status').textContent = `Reading card… ${Math.round(m.progress * 100)}%`)
+      });
+      rawText = data.text;
+      const fields = parseCard(rawText);
+      for (const [k, v] of Object.entries(fields)) form.elements[k].value = v;
+      form.elements.notes.value = '';
+      $('status').textContent = 'Check the details, fix anything wrong, then Save.';
+      form.style.display = 'block';
+    } catch (err) {
+      $('status').textContent = 'Could not read card: ' + err.message;
+    }
+  };
+
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    if (!data.name && !data.phone && !data.email) return alert('Enter at least a name, phone or email.');
+    $('save').disabled = true;
+    $('status').textContent = 'Saving…';
+    try {
+      // text/plain avoids a CORS preflight, which Apps Script can't answer
+      const res = await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify({ ...data, rawText, token: TOKEN }) });
+      const out = await res.json();
+      if (!out.ok) throw new Error(out.error);
+      $('status').textContent = '✅ Saved to Google Sheet';
+      resetAll(false);
+    } catch (err) {
+      $('status').textContent = '❌ Not saved: ' + err.message;
+    } finally {
+      $('save').disabled = false;
+    }
+  };
+
+  function resetAll(clearStatus = true) {
+    form.reset(); form.style.display = 'none';
+    $('preview').style.display = 'none'; $('cam').value = ''; rawText = '';
+    if (clearStatus) $('status').textContent = '';
+  }
+  $('reset').onclick = () => resetAll();
+</script>
+</body>
+</html>
