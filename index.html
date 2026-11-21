@@ -129,7 +129,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="parse.js?v=3"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
+<script src="parse.js?v=4"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
@@ -173,33 +173,72 @@
   }
   worker = newWorker(); // warm up so the first scan is quicker
 
-  // Fix phone rotation, resize to ~1600px, greyscale. Dark cards are flipped to dark-on-light.
-  // (Tested: contrast boosts and black/white thresholding made results worse, so they are left out.)
-  async function prepImage(file) {
-    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const s = 1600 / Math.max(bmp.width, bmp.height);
-    const c = document.createElement('canvas');
-    const w = c.width = Math.round(bmp.width * s), h = c.height = Math.round(bmp.height * s);
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.filter = 'grayscale(1)';
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close(); // free the full-size photo now
-    const img = ctx.getImageData(0, 0, w, h), d = img.data;
-    let sum = 0, n = 0, lo = 255, hi = 0;
-    for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
-    for (let i = 0; i < d.length; i += 64) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
-    // A completely flat image means the phone gave us a blank canvas (out of memory), not a real photo
-    if (hi - lo < 8) { freeCanvas(c); throw new Error('blank image'); }
-    if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
-    return c;
-  }
   const freeCanvas = c => { c.width = c.height = 0; }; // iPhones only free canvas memory this way
 
+  // 1. Fix phone rotation and find the white card in the photo (backgrounds like cloth/tables
+  //    confuse the reader), then cut it out at 1400px greyscale (tested best on real cards).
+  //    If no white card is found (dark card, or card fills the photo) the whole photo is used,
+  //    and dark images are flipped to dark-on-light.
+  async function prepImage(file) {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    try {
+      const s = 2000 / Math.max(bmp.width, bmp.height);
+      const look = document.createElement('canvas');
+      const W = look.width = Math.round(bmp.width * s), H = look.height = Math.round(bmp.height * s);
+      const lctx = look.getContext('2d', { willReadFrequently: true });
+      lctx.drawImage(bmp, 0, 0, W, H);
+      const px = lctx.getImageData(0, 0, W, H);
+      freeCanvas(look);
+      let lo = 255, hi = 0;
+      for (let i = 0; i < px.data.length; i += 64) { const v = px.data[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      // A completely flat image means the phone gave us a blank canvas (out of memory), not a real photo
+      if (hi - lo < 8) throw new Error('blank image');
+
+      const box = findCard(px) || { x: 0, y: 0, w: W, h: H };
+      const bw = Math.min(box.w, W - box.x), bh = Math.min(box.h, H - box.y);
+      const t = 1400 / Math.max(bw, bh);
+      const c = document.createElement('canvas');
+      const w = c.width = Math.round(bw * t), h = c.height = Math.round(bh * t);
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.filter = 'grayscale(1)';
+      ctx.drawImage(bmp, box.x / s, box.y / s, bw / s, bh / s, 0, 0, w, h);
+      const img = ctx.getImageData(0, 0, w, h), d = img.data;
+      let sum = 0, n = 0;
+      for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
+      if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
+      return c;
+    } finally { bmp.close(); } // free the full-size photo now
+  }
+
+  function rotated(src, deg) {
+    if (!deg) return src;
+    const c = document.createElement('canvas'), side = deg % 180 !== 0;
+    c.width = side ? src.height : src.width; c.height = side ? src.width : src.height;
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width / 2, c.height / 2); ctx.rotate(deg * Math.PI / 180);
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    return c;
+  }
+
+  // 2. Read it. A tall cut-out is usually a card photographed sideways, so try the side
+  //    rotations first; keep whichever reading finds the most details.
   async function readOnce(file) {
     const w = await getWorker();
     const c = await prepImage(file);
-    try { return (await w.recognize(c)).data.text; }
-    finally { freeCanvas(c); scansOnWorker++; }
+    try {
+      const order = c.height > c.width * 1.15 ? [90, 270, 0] : [0, 180];
+      let best = null;
+      for (const deg of order) {
+        const r = rotated(c, deg);
+        try {
+          const { data } = await w.recognize(r);
+          const fields = parseCard(data.text), score = scoreReading(fields, data.confidence);
+          if (!best || score > best.score) best = { text: data.text, score };
+          if (fields.email && fields.phone && fields.name) break; // good enough
+        } finally { if (r !== c) freeCanvas(r); }
+      }
+      return best.text;
+    } finally { freeCanvas(c); scansOnWorker++; }
   }
 
   async function readCard(file) {

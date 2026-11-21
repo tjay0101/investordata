@@ -45,4 +45,21 @@ assert.strictEqual(r.name, 'Vikram Nair');
 assert.strictEqual(r.website, 'www.horizoncap.in');
 assert.strictEqual(parseCard(`A B\nx@greenleaf.in\ngreenleaf.in`).website, 'greenleaf.in'); // already clean: untouched
 
+// 5. Real-photo style: junk from a patterned background above the name; name found via the email.
+//    (Made-up person; mirrors how real cards came out of the reader.)
+r = parseCard(`Cl\nAR VAR\nSASL\nWOOL CRU cd SERA\nRohan Deshmukh\n+91 9876501234\nProduct Strategy and Marketing\nrohan.deshmukh@freshfoods.com\nAl,\nvaler\nnutrition`);
+assert.strictEqual(r.name, 'Rohan Deshmukh');
+assert.strictEqual(r.designation, 'Product Strategy and Marketing');
+assert.strictEqual(r.phone, '+91 9876501234');
+assert.strictEqual(r.company, 'Freshfoods');
+// 6. Name with an initial/abbreviation, email uses only part of it
+r = parseCard(`Aran\nLh)\nMohd. Imran Shaikh\nExecutive Engineer\n+91 9123456780\nimran.shaikh@freshfoods.com`);
+assert.strictEqual(r.name, 'Mohd. Imran Shaikh');
+assert.strictEqual(r.designation, 'Executive Engineer');
+
+// 7. Spaces/underscore inside the email from OCR; real underscores in emails survive
+assert.strictEqual(parseCard(`Rohan Deshmukh\n~ rohan. _deshmukh@freshfoods. com`).email, 'rohan.deshmukh@freshfoods.com');
+assert.strictEqual(parseCard(`Rohan Deshmukh\nrohan_d@freshfoods.com`).email, 'rohan_d@freshfoods.com');
+assert.strictEqual(parseCard(`Mohd. Imran Shaikh\nx`).name, 'Mohd. Imran Shaikh'); // dots in names untouched
+
 console.log('ok');
