@@ -122,37 +122,75 @@
 
 <div class="bar"><div class="inner">
   <button type="button" class="btn clear" id="reset">Clear</button>
-  <button type="submit" class="btn save" id="save" form="form">💾 Save to Sheet</button>
+  <button type="submit" class="btn save" id="save" form="form">💾 Save</button>
 </div></div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="parse.js"></script>
-<script>
-  // Paste your Apps Script Web App URL here (see README.md)
-  const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyZH-Yh3un5WrC2-JFwL2hl4lFkaRt2NNhA7RyVHXrDyOTvuKflFoSVrj0WDND5vl4/exec';
-  const TOKEN = 'aquaminder-2026'; // must match TOKEN in apps-script/Code.gs
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
+  import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+  import { getAI, getGenerativeModel, GoogleAIBackend, Schema } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-ai.js';
+
+  // Public web config (safe to ship; access is controlled by Firestore rules, see firestore.rules)
+  const app = initializeApp({
+    apiKey: 'AIzaSyD5FPGrL5rH4Gux9z7KgbMsxjlIsfbkxHU',
+    authDomain: 'investor-data-d3a33.firebaseapp.com',
+    projectId: 'investor-data-d3a33',
+    storageBucket: 'investor-data-d3a33.firebasestorage.app',
+    messagingSenderId: '804131945497',
+    appId: '1:804131945497:web:c4e31c22c8aa976ecc7e88'
+  });
+  const db = getFirestore(app);
+
+  const FIELDS = ['name', 'designation', 'company', 'phone', 'email', 'website', 'address'];
+  const model = getGenerativeModel(getAI(app, { backend: new GoogleAIBackend() }), {
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: Schema.object({ properties: Object.fromEntries(FIELDS.map(f => [f, Schema.string()])) })
+    }
+  });
+  const PROMPT = `This is a photo of a business/visiting card. Extract the person's details exactly as printed.
+name: person's full name. designation: job title. company: company/firm name.
+phone: all phone numbers, separated by " / ", keep country code. email: email address. website: website.
+address: full postal address on one line. Use "" for anything not on the card. Do not guess.`;
 
   const $ = id => document.getElementById(id);
   const form = $('form');
   const bar = $('progress').firstElementChild;
-  let rawText = '';
+  let rawText = '', source = '';
 
-  // Fix rotation, resize to a size OCR likes, grayscale + contrast. Biggest accuracy win for phone photos.
-  async function prepImage(file) {
+  // Fix rotation and resize. Gray + contrast helps the backup OCR; AI gets the colour image.
+  async function prepImage(file, gray) {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const s = 2000 / Math.max(bmp.width, bmp.height);
+    const s = 1600 / Math.max(bmp.width, bmp.height);
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
     const ctx = c.getContext('2d');
-    ctx.filter = 'grayscale(1) contrast(1.5) brightness(1.05)'; // ignored on old Safari, still works
+    if (gray) ctx.filter = 'grayscale(1) contrast(1.5) brightness(1.05)';
     ctx.drawImage(bmp, 0, 0, c.width, c.height);
     return c;
   }
 
+  async function readWithAI(file) {
+    const b64 = (await prepImage(file, false)).toDataURL('image/jpeg', 0.85).split(',')[1];
+    const res = await model.generateContent([PROMPT, { inlineData: { data: b64, mimeType: 'image/jpeg' } }]);
+    return JSON.parse(res.response.text());
+  }
+
+  async function readWithOCR(file) {
+    const { data } = await Tesseract.recognize(await prepImage(file, true), 'eng', {
+      logger: m => m.status === 'recognizing text' && (bar.style.width = Math.max(5, m.progress * 100) + '%')
+    });
+    rawText = data.text;
+    return parseCard(rawText);
+  }
+
   function toast(msg, type) {
     const t = $('toast'); t.textContent = msg; t.className = 'toast show ' + type;
-    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3000);
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3500);
   }
 
   function markFilled() {
@@ -166,19 +204,22 @@
     if (!file) return;
     $('preview').src = URL.createObjectURL(file);
     $('preview').style.display = 'block';
-    $('progress').style.display = 'block'; bar.style.width = '5%';
-    $('status').textContent = '✨ Reading card…';
+    $('progress').style.display = 'block'; bar.style.width = '40%';
+    $('status').textContent = '✨ AI is reading the card…';
+    rawText = '';
     try {
-      const img = await prepImage(file);
-      const { data } = await Tesseract.recognize(img, 'eng', {
-        logger: m => m.status === 'recognizing text' && (bar.style.width = Math.max(5, m.progress * 100) + '%')
-      });
-      rawText = data.text;
-      const fields = parseCard(rawText);
-      for (const [k, v] of Object.entries(fields)) form.elements[k].value = v;
+      let fields;
+      try {
+        fields = await readWithAI(file); source = 'ai';
+      } catch (err) {
+        console.warn('AI read failed, using backup OCR', err);
+        $('status').textContent = '✨ Reading card (backup mode)…'; bar.style.width = '5%';
+        fields = await readWithOCR(file); source = 'ocr';
+      }
+      for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
       markFilled();
-      const found = Object.values(fields).filter(Boolean).length;
-      $('status').textContent = found ? `✅ Found ${found} details. Please check and fix if needed.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
+      const found = FIELDS.filter(k => fields[k]).length;
+      $('status').textContent = found ? `✅ Found ${found} details${source === 'ocr' ? ' (backup mode)' : ''}. Please check before saving.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
       form.scrollIntoView({ behavior: 'smooth' });
     } catch (err) {
       $('status').textContent = '❌ Could not read card: ' + err.message;
@@ -193,24 +234,20 @@
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form));
     if (!data.name && !data.phone && !data.email) return toast('Enter at least a name, phone or email', 'err');
-    if (SHEET_URL.startsWith('PASTE')) return toast('Google Sheet not connected yet (SHEET_URL)', 'err');
     $('save').disabled = true; $('save').textContent = 'Saving…';
     try {
-      // text/plain avoids a CORS preflight, which Apps Script can't answer
-      const res = await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify({ ...data, rawText, token: TOKEN }) });
-      const out = await res.json();
-      if (!out.ok) throw new Error(out.error);
-      toast('✅ Saved to Google Sheet', 'ok');
+      await addDoc(collection(db, 'investors'), { ...data, rawText, source: source || 'manual', createdAt: serverTimestamp() });
+      toast('✅ Saved', 'ok');
       resetAll();
     } catch (err) {
       toast('Not saved: ' + err.message, 'err');
     } finally {
-      $('save').disabled = false; $('save').textContent = '💾 Save to Sheet';
+      $('save').disabled = false; $('save').textContent = '💾 Save';
     }
   };
 
   function resetAll() {
-    form.reset(); markFilled(); rawText = '';
+    form.reset(); markFilled(); rawText = ''; source = '';
     $('preview').style.display = 'none'; $('status').textContent = '';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
