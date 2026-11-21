@@ -47,13 +47,10 @@
   .scan-btn .ico { font-size: 26px; }
   @keyframes pulse { 0%,100% { box-shadow: 0 10px 24px rgba(255,92,154,.35); } 50% { box-shadow: 0 10px 34px rgba(255,92,154,.65); } }
   @media (prefers-reduced-motion: reduce) { .scan-btn { animation: none; } }
-  .ai-off { display: none; width: 100%; margin-bottom: 14px; padding: 12px; border: 2px dashed #ffb020; border-radius: 14px; background: #fff8e6; color: #8a5a00; font: 500 14px Poppins, sans-serif; cursor: pointer; }
-  .ai-off b { color: #c27700; }
-  .ai-on { display: none; margin-bottom: 12px; font-size: 13px; color: var(--mint); font-weight: 600; }
-  .ai-on button { border: 0; background: none; color: var(--muted); font: 12px Poppins, sans-serif; text-decoration: underline; cursor: pointer; }
   .gallery { display: inline-block; margin-top: 12px; color: var(--deep); font-weight: 500; font-size: 14px; cursor: pointer; }
   .gallery:hover { text-decoration: underline; }
 
+  .tip { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
   #preview { display: none; width: 100%; max-height: 220px; object-fit: contain; margin-top: 16px; border-radius: 14px; background: #f4f8fc; }
   .progress { display: none; height: 8px; margin-top: 14px; border-radius: 99px; background: #e6eef7; overflow: hidden; }
   .progress div { height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, var(--mint), var(--aqua), var(--violet)); transition: width .3s; }
@@ -101,12 +98,11 @@
 
 <main>
   <section class="scan">
-    <button type="button" class="ai-off" id="aiOff">⚠️ <b>AI reader is off on this device.</b> Results will be poor. Tap here to turn it on (paste the Gemini key once).</button>
-    <div class="ai-on" id="aiOn">🤖 AI reader is on <button type="button" id="aiChange">change key</button></div>
     <label class="scan-btn" for="cam"><span class="ico">📸</span> Scan Visiting Card</label>
     <input id="cam" type="file" accept="image/*" capture="environment" hidden>
     <label class="gallery" for="pick">🖼️ or choose a photo from gallery</label>
     <input id="pick" type="file" accept="image/*" hidden>
+    <p class="tip">💡 For best results: card flat, fills the photo, good light, no shadow, hold steady.</p>
     <img id="preview" alt="Scanned card">
     <div class="progress" id="progress"><div></div></div>
     <div id="status"></div>
@@ -150,67 +146,38 @@
   const db = getFirestore(app);
 
   const FIELDS = ['name', 'designation', 'company', 'phone', 'email', 'website', 'address'];
-  // Gemini key is NOT in this public code. Each phone saves it once via a private setup link:
-  //   https://tjay0101.github.io/investordata/#key=YOUR_KEY   (the #part never reaches any server)
-  // ponytail: key lives in the phone browser; move to a server proxy if many people need access.
-  const MODELS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-flash-latest']; // tried in order if one is busy
-  let geminiKey = '';
-  try {
-    const k = new URLSearchParams(location.hash.slice(1)).get('key');
-    if (k) { localStorage.setItem('geminiKey', k.trim()); history.replaceState(null, '', location.pathname); }
-    geminiKey = localStorage.getItem('geminiKey') || '';
-  } catch {}
-  const PROMPT = `This is a photo of a business/visiting card. Extract the person's details exactly as printed.
-name: person's full name. designation: job title. company: company/firm name.
-phone: all phone numbers, separated by " / ", keep country code. email: email address. website: website.
-address: full postal address on one line. Use "" for anything not on the card. Do not guess.`;
 
   const $ = id => document.getElementById(id);
   const form = $('form');
   const bar = $('progress').firstElementChild;
   let rawText = '', source = '';
 
-  // Fix rotation and resize. Gray + contrast helps the backup OCR; AI gets the colour image.
-  async function prepImage(file, gray) {
+  // Free in-browser text reader. One worker, created at page load so the first scan is quicker.
+  // PSM 11 = "sparse text": best on cards in our tests (scattered lines, two columns).
+  let onProgress = () => {};
+  const worker = Tesseract.createWorker('eng', 1, { logger: m => m.status === 'recognizing text' && onProgress(m.progress) })
+    .then(async w => { await w.setParameters({ tessedit_pageseg_mode: '11' }); return w; });
+
+  // Fix phone rotation, resize to ~1600px, greyscale. Dark cards are flipped to dark-on-light.
+  // (Tested: contrast boosts and black/white thresholding made results worse, so they are left out.)
+  async function prepImage(file) {
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
     const s = 1600 / Math.max(bmp.width, bmp.height);
     const c = document.createElement('canvas');
-    c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
-    const ctx = c.getContext('2d');
-    if (gray) ctx.filter = 'grayscale(1) contrast(1.5) brightness(1.05)';
-    ctx.drawImage(bmp, 0, 0, c.width, c.height);
+    const w = c.width = Math.round(bmp.width * s), h = c.height = Math.round(bmp.height * s);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.filter = 'grayscale(1)';
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    let sum = 0, n = 0;
+    for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
+    if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
     return c;
   }
 
-  async function readWithAI(file) {
-    if (!geminiKey) throw new Error('AI key not set on this phone');
-    const b64 = (await prepImage(file, false)).toDataURL('image/jpeg', 0.85).split(',')[1];
-    const body = JSON.stringify({
-      contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: { type: 'OBJECT', properties: Object.fromEntries(FIELDS.map(f => [f, { type: 'STRING' }])) }
-      }
-    });
-    let lastErr;
-    for (const m of MODELS) {
-      try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey }, body,
-          signal: AbortSignal.timeout(20000)
-        });
-        const out = await res.json();
-        if (!res.ok) throw new Error(out.error?.message || res.status);
-        return JSON.parse(out.candidates[0].content.parts[0].text);
-      } catch (err) { lastErr = err; console.warn(m, err.message); }
-    }
-    throw lastErr;
-  }
-
-  async function readWithOCR(file) {
-    const { data } = await Tesseract.recognize(await prepImage(file, true), 'eng', {
-      logger: m => m.status === 'recognizing text' && (bar.style.width = Math.max(5, m.progress * 100) + '%')
-    });
+  async function readCard(file) {
+    onProgress = p => bar.style.width = Math.max(5, p * 100) + '%';
+    const { data } = await (await worker).recognize(await prepImage(file));
     rawText = data.text;
     return parseCard(rawText);
   }
@@ -231,22 +198,15 @@ address: full postal address on one line. Use "" for anything not on the card. D
     if (!file) return;
     $('preview').src = URL.createObjectURL(file);
     $('preview').style.display = 'block';
-    $('progress').style.display = 'block'; bar.style.width = '40%';
-    $('status').textContent = '✨ AI is reading the card…';
+    $('progress').style.display = 'block'; bar.style.width = '5%';
+    $('status').textContent = '✨ Reading card…';
     rawText = '';
     try {
-      let fields;
-      try {
-        fields = await readWithAI(file); source = 'ai';
-      } catch (err) {
-        console.warn('AI read failed, using backup OCR', err);
-        $('status').textContent = '✨ Reading card (backup mode)…'; bar.style.width = '5%';
-        fields = await readWithOCR(file); source = 'ocr';
-      }
+      const fields = await readCard(file); source = 'ocr';
       for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
       markFilled();
       const found = FIELDS.filter(k => fields[k]).length;
-      $('status').textContent = found ? `✅ Found ${found} details${source === 'ocr' ? (geminiKey ? ' (backup mode: AI failed, try again or tap "change key")' : ' (backup mode, AI key not set on this phone)') : ''}. Please check before saving.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
+      $('status').textContent = found ? `✅ Found ${found} details. Please check before saving.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
       form.scrollIntoView({ behavior: 'smooth' });
     } catch (err) {
       $('status').textContent = '❌ Could not read card: ' + err.message;
@@ -254,22 +214,6 @@ address: full postal address on one line. Use "" for anything not on the card. D
       $('progress').style.display = 'none';
     }
   }
-  function showAIState() {
-    $('aiOff').style.display = geminiKey ? 'none' : 'block';
-    $('aiOn').style.display = geminiKey ? 'block' : 'none';
-  }
-  function askKey() {
-    const k = prompt('Paste the Gemini API key (starts with "AQ." or "AIza"). It is saved only on this device.', '');
-    if (k === null) return;
-    geminiKey = k.trim();
-    try { geminiKey ? localStorage.setItem('geminiKey', geminiKey) : localStorage.removeItem('geminiKey'); } catch {}
-    showAIState();
-    if (geminiKey) toast('🤖 AI reader turned on', 'ok');
-  }
-  $('aiOff').onclick = askKey;
-  $('aiChange').onclick = askKey;
-  showAIState();
-
   $('cam').onchange = scan;
   $('pick').onchange = scan;
 

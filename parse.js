@@ -20,7 +20,7 @@ function parseCard(text) {
 
   const isContact = l => /@|www\.|https?:|\.(com|in|vc|co|net|org|io)\b/i.test(l) || l.replace(/\D/g, '').length >= 8;
   const desigRe = /\b(ceo|cfo|cto|coo|cio|founder|co-?founder|director|partner|manager|president|vp|vice president|head|analyst|associate|principal|chairman|chairperson|md|managing|investor|advisor|adviser|consultant|officer|executive|lead|owner|proprietor|general partner|gp|venture|angel)\b/i;
-  const companyRe = /\b(pvt|private|ltd|limited|llp|llc|inc|corp|corporation|capital|ventures|partners|fund|investments?|holdings|group|technologies|tech|solutions|associates|bank|securities|advisors|advisory|enterprises|industries|global|labs|equity|finance|financial|wealth|asset)\b/i;
+  const companyRe = /\b(pvt|private|ltd|limited|llp|llc|inc|corp|corporation|capital|ventures|partners|fund|investments?|holdings|group|technologies|tech|solutions|associates|bank|securities|advisors|advisory|enterprises|industries|global|labs|equity|finance|financial|wealth|asset|assets|angels|network|family office|vc|ventures?|trust|management|consulting|company)\b/i;
   const addrRe = /\b(road|rd|street|st|floor|flr|nagar|sector|lane|marg|tower|building|bldg|plot|block|avenue|ave|suite|park|complex|chowk|colony|opp|near|east|west|mumbai|delhi|bengaluru|bangalore|pune|hyderabad|chennai|kolkata|gurgaon|gurugram|noida|ahmedabad|india|usa|singapore|dubai)\b|\b\d{6}\b|\b\d{3} ?\d{3}\b/i;
   const looksName = l => /^[A-Za-z][A-Za-z. ]+$/.test(l) && l.split(' ').length >= 2 && l.split(' ').length <= 4 && !desigRe.test(l) && !companyRe.test(l) && !addrRe.test(l);
 
