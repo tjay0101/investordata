@@ -9,7 +9,11 @@ function parseCard(text) {
 
   const all = lines.join('\n');
   const email = (all.match(/[\w.+-]+@[\w-]+(\.[a-z]{2,})+/i) || [''])[0].toLowerCase();
-  const website = ((all.replace(email, '').match(/\b(?:https?:\/\/)?(?:www\.[\w-]+(?:\.[a-z]{2,})+|[\w-]+\.(?:co\.in|com|in|co|net|org|io|vc|capital|ai|biz))\b/i) || [''])[0]).toLowerCase();
+  let website = ((all.replace(email, '').match(/\b(?:https?:\/\/)?(?:www\.[\w-]+(?:\.[a-z]{2,})+|[\w-]+\.(?:co\.in|com|in|co|net|org|io|vc|capital|ai|biz))\b/i) || [''])[0]).toLowerCase();
+
+  // "lgreenleaf.co.in" -> "www.greenleaf.co.in" when it ends with the email's domain (misread "www.")
+  const domain = email.split('@')[1] || '';
+  if (domain && website !== domain && website.endsWith(domain) && !/^(www\.|https?:)/.test(website)) website = 'www.' + domain;
 
   // Phones: per line so numbers on adjacent lines never merge; 10-13 digits
   const phones = [];
@@ -24,7 +28,10 @@ function parseCard(text) {
   const addrRe = /\b(road|rd|street|st|floor|flr|nagar|sector|lane|marg|tower|building|bldg|plot|block|avenue|ave|suite|park|complex|chowk|colony|opp|near|east|west|mumbai|delhi|bengaluru|bangalore|pune|hyderabad|chennai|kolkata|gurgaon|gurugram|noida|ahmedabad|india|usa|singapore|dubai)\b|\b\d{6}\b|\b\d{3} ?\d{3}\b/i;
   const looksName = l => /^[A-Za-z][A-Za-z. ]+$/.test(l) && l.split(' ').length >= 2 && l.split(' ').length <= 4 && !desigRe.test(l) && !companyRe.test(l) && !addrRe.test(l);
 
-  const di = lines.findIndex(l => desigRe.test(l) && !isContact(l) && !companyRe.test(l));
+  // Job title: prefer one sitting right under a name-looking line (OCR noise can also contain "lead", "head"...)
+  const isDesig = l => desigRe.test(l) && !isContact(l) && !companyRe.test(l);
+  let di = lines.findIndex((l, i) => isDesig(l) && i > 0 && looksName(lines[i - 1]));
+  if (di < 0) di = lines.findIndex(isDesig);
   const designation = di >= 0 ? lines[di] : '';
   // Name is usually right above the designation; otherwise the first name-looking line
   const name = (di > 0 && looksName(lines[di - 1]) ? lines[di - 1] : lines.find(l => looksName(l) && !isContact(l))) || '';

@@ -38,4 +38,11 @@ r = parseCard(`Amit Verma\nDirector\namit@greenleaf.in`);
 assert.strictEqual(r.company, 'Greenleaf');
 assert.strictEqual(parseCard(`Amit Verma\nAngel Investor\namit@gmail.com`).company, '');
 
+// 4. OCR noise: stray "Lead" before the real title; misread "www." in website
+r = parseCard(`Horizon Capital\nLead\na0\nVikram Nair\nManaging Director\nM: +91 98200 11223\nvikram.nair@horizoncap.in\nlhorizoncap.in`);
+assert.strictEqual(r.designation, 'Managing Director');
+assert.strictEqual(r.name, 'Vikram Nair');
+assert.strictEqual(r.website, 'www.horizoncap.in');
+assert.strictEqual(parseCard(`A B\nx@greenleaf.in\ngreenleaf.in`).website, 'greenleaf.in'); // already clean: untouched
+
 console.log('ok');
