@@ -49,6 +49,7 @@ function parseCard(text) {
   const name = ni >= 0 ? lines[ni] : '';
 
   let company = lines.find(l => companyRe.test(l) && l !== designation && !isContact(l)) || '';
+  const companyGuess = !company && !!email;
   if (!company && email && !/@(gmail|yahoo|outlook|hotmail|rediffmail|icloud|live)\./.test(email)) {
     const d = email.split('@')[1].split('.')[0];
     company = d.charAt(0).toUpperCase() + d.slice(1);   // fallback: company from email domain
@@ -57,7 +58,8 @@ function parseCard(text) {
   const address = lines.filter(l => addrRe.test(l) && !/@|www\./i.test(l) && l !== company && l !== name && l !== designation
     && l.replace(/\D/g, '').length < 10).join(', ');
 
-  return { name: titleCase(name), designation, company, email, phone: [...new Set(phones)].join(' / '), website, address };
+  // companyGuess: company was only guessed from the email domain (a real company line should replace it)
+  return { name: titleCase(name), designation, company, email, phone: [...new Set(phones)].join(' / '), website, address, companyGuess };
 }
 
 // "RAHUL SHARMA" -> "Rahul Sharma"; leaves mixed case alone

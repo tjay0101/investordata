@@ -148,7 +148,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="parse.js?v=5"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
+<script src="parse.js?v=6"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
@@ -320,6 +320,7 @@
       const fields = parseCard(text);
       if (side === 'front') {
         for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
+        guessedCompany = fields.companyGuess ? fields.company : '';
         form.elements.notes.value = ''; // new card: don't carry over the last card's notes
         if (sides.back) mergeIn(parseCard(sides.back.text));
       } else mergeIn(fields);
@@ -337,12 +338,15 @@
     }
   }
 
-  // Fill only empty fields; phone numbers are added to the list
+  // Fill only empty fields; phone numbers are added to the list; a company that was only
+  // guessed from the email is replaced by a real company name from the other side
+  let guessedCompany = '';
   function mergeIn(f) {
     for (const k of FIELDS) {
       const el = form.elements[k], v = (f[k] || '').trim();
       if (!v) continue;
       if (!el.value.trim()) el.value = v;
+      else if (k === 'company' && !f.companyGuess && guessedCompany && el.value === guessedCompany) { el.value = v; guessedCompany = ''; }
       else if (k === 'phone') el.value = [...new Set([...el.value.split(' / '), ...v.split(' / ')])].join(' / ');
     }
   }

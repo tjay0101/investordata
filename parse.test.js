@@ -62,4 +62,8 @@ assert.strictEqual(parseCard(`Rohan Deshmukh\n~ rohan. _deshmukh@freshfoods. com
 assert.strictEqual(parseCard(`Rohan Deshmukh\nrohan_d@freshfoods.com`).email, 'rohan_d@freshfoods.com');
 assert.strictEqual(parseCard(`Mohd. Imran Shaikh\nx`).name, 'Mohd. Imran Shaikh'); // dots in names untouched
 
+// 8. Company guessed from email is flagged; a real company line is not
+assert.strictEqual(parseCard(`Amit Verma\nDirector\namit@greenleaf.in`).companyGuess, true);
+assert.strictEqual(parseCard(`Amit Verma\nGreenleaf Capital LLP\namit@greenleaf.in`).companyGuess, false);
+
 console.log('ok');
