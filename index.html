@@ -147,7 +147,7 @@
   // Gemini key is NOT in this public code. Each phone saves it once via a private setup link:
   //   https://tjay0101.github.io/investordata/#key=YOUR_KEY   (the #part never reaches any server)
   // ponytail: key lives in the phone browser; move to a server proxy if many people need access.
-  const MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-flash-latest']; // tried in order if one is busy
+  const MODELS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-flash-latest']; // tried in order if one is busy
   let geminiKey = '';
   try {
     const k = new URLSearchParams(location.hash.slice(1)).get('key');
@@ -191,7 +191,7 @@ address: full postal address on one line. Use "" for anything not on the card. D
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey }, body,
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(20000)
         });
         const out = await res.json();
         if (!res.ok) throw new Error(out.error?.message || res.status);
