@@ -148,7 +148,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script src="parse.js?v=6"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
+<script src="parse.js?v=7"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
@@ -214,6 +214,7 @@
     const c = document.createElement('canvas');
     const w = c.width = Math.round(box.w * t), h = c.height = Math.round(box.h * t);
     const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // transparent PNGs would otherwise read as black
     ctx.filter = 'grayscale(1)';
     ctx.drawImage(bmp, box.x / s, box.y / s, box.w / s, box.h / s, 0, 0, w, h);
     const img = ctx.getImageData(0, 0, w, h), d = img.data;
@@ -240,7 +241,7 @@
       try {
         const { data } = await w.recognize(r);
         const fields = parseCard(data.text), score = scoreReading(fields, data.confidence);
-        if (!best || score > best.score) best = { text: data.text, fields, score };
+        if (!best || score > best.score) best = { text: data.text, fields, score, deg };
         if (fields.email && fields.phone && fields.name) break; // good enough
       } finally { if (r !== c) freeCanvas(r); }
     }
@@ -258,6 +259,7 @@
       const look = document.createElement('canvas');
       const W = look.width = Math.round(bmp.width * s), H = look.height = Math.round(bmp.height * s);
       const lctx = look.getContext('2d', { willReadFrequently: true });
+      lctx.fillStyle = '#fff'; lctx.fillRect(0, 0, W, H);
       lctx.drawImage(bmp, 0, 0, W, H);
       const px = lctx.getImageData(0, 0, W, H);
       freeCanvas(look);
@@ -277,6 +279,12 @@
         $('status').textContent = '✨ Hard to read, trying harder…';
         c = cutOut(bmp, whole, s);
         try { best = await readRotations(w, c, [0, 90, 270, 180], best); }
+        finally { freeCanvas(c); }
+      } else if (box && !best.fields.name) {
+        // The cut-out may have missed part of the card (e.g. half white, half coloured):
+        // read the whole photo once more in the same rotation and keep the better reading
+        c = cutOut(bmp, whole, s);
+        try { best = await readRotations(w, c, [best.deg], best); }
         finally { freeCanvas(c); }
       }
       return { text: best.text, thumb };

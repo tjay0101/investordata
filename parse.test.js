@@ -66,4 +66,27 @@ assert.strictEqual(parseCard(`Mohd. Imran Shaikh\nx`).name, 'Mohd. Imran Shaikh'
 assert.strictEqual(parseCard(`Amit Verma\nDirector\namit@greenleaf.in`).companyGuess, true);
 assert.strictEqual(parseCard(`Amit Verma\nGreenleaf Capital LLP\namit@greenleaf.in`).companyGuess, false);
 
+// 9. Accented names, French title, email with spaces
+r = parseCard(`cbank\nAmélie Dupré\nPrésident du Conseil\namelie. dupre @ exemple.fr\n44 rue Louis Blanc - 75010 Paris - tél. 33 (0) 1 44 89 30 75`);
+assert.strictEqual(r.name, 'Amélie Dupré');
+assert.strictEqual(r.designation, 'Président du Conseil');
+assert.strictEqual(r.email, 'amelie.dupre@exemple.fr');
+// 10. Title and organisation on one line, split at the comma
+r = parseCard(`JANE DOE\nMANAGING DIRECTOR, INTERNATIONAL MONETARY FUND`);
+assert.strictEqual(r.designation, 'MANAGING DIRECTOR');
+assert.strictEqual(r.company, 'INTERNATIONAL MONETARY FUND');
+assert.strictEqual(r.name, 'Jane Doe');
+// 11. Websites: other country domains, "www thunders co kr" with spaces for dots
+assert.strictEqual(parseCard(`http://beispiel.de`).website, 'http://beispiel.de');
+assert.strictEqual(parseCard(`www thunders co kr`).website, 'www.thunders.co.kr');
+assert.strictEqual(parseCard(`Visit WWW.Example.co.uk`).website, 'www.example.co.uk');
+// 12. Lowercase junk is not a name; the name next to the title wins over other capitalised lines
+r = parseCard(`TECH-UP\nincorporated not for profit\nCHICAGO ILLINOIS\nJack Jones\n130 N. Green St\nRepresentative`);
+assert.strictEqual(r.name, 'Jack Jones');
+assert.strictEqual(r.designation, 'Representative');
+// 13. "GROUP" alone joins the line above
+assert.strictEqual(parseCard(`Bayerische Motoren\nBMW\nGROUP\nHanns Huber`).company, 'BMW GROUP');
+// 14. Phone in brackets keeps the bracket
+assert.strictEqual(parseCard(`mobile: (34) 629 873 502`).phone, '(34) 629 873 502');
+
 console.log('ok');

@@ -1,17 +1,53 @@
 // Turns raw OCR text from a visiting card into fields. Heuristic: user reviews/edits before saving.
 // ponytail: keyword/regex heuristics, swap for an AI/vision API if accuracy on odd layouts isn't enough.
+const TLD = 'com|net|org|info|biz|in|co|io|vc|ai|app|dev|tech|xyz|me|capital|gov|edu|uk|us|ca|au|nz|de|fr|es|it|nl|be|ch|at|eu|se|no|dk|fi|pl|pt|ie|ru|ua|sk|cz|br|mx|ar|jp|cn|kr|tw|hk|sg|my|vn|th|id|ph|ae|sa|pk|lk|bd|np|za';
+const desigRe = new RegExp('\\b(' + [
+  'ceo', 'cfo', 'cto', 'coo', 'cio', 'cmo', 'founder', 'co-?founder', 'director', 'partner', 'manager', 'president', 'vp',
+  'vice president', 'head', 'analyst', 'associate', 'principal', 'chairman', 'chairperson', 'chairwoman', 'md', 'managing',
+  'investor', 'advisor', 'adviser', 'consultant', 'officer', 'executive', 'lead', 'owner', 'proprietor', 'general partner', 'gp',
+  'venture', 'angel', 'engineer', 'marketing', 'strategy', 'product', 'sales', 'operations', 'business development',
+  'developer', 'designer', 'specialist', 'coordinator', 'representatives?', 'accountant', 'secretary', 'trustee', 'professor',
+  'scientist', 'architect', 'intern', 'supervisor', 'administrator', 'admin', 'hr', 'member', 'candidate', 'journalist',
+  'author', 'writer', 'editor', 'reporter', 'photographer', 'artist', 'lawyer', 'advocate', 'attorney', 'doctor', 'physician',
+  'surgeon', 'coach', 'scout', 'chef', 'teacher', 'lecturer', 'broker', 'agent', 'trainer', 'mentor', 'ambassador', 'minister',
+  'mayor', 'counsel', 'auditor', 'treasurer', 'producer', 'manageress',
+  // French / Spanish / German / Italian titles
+  'directeur', 'directrice', 'président', 'présidente', 'gérant', 'gérante', 'responsable', 'ingénieur', 'chargée?',
+  'conseill[eè]re?', 'directora', 'gerente', 'presidente', 'geschäftsführer(in)?', 'leiter(in)?', 'vorstand', 'inhaber(in)?',
+  'berater(in)?', 'direttore', 'amministratore'
+].join('|') + ')\\b', 'i');
+const companyRe = new RegExp('\\b(' + [
+  'pvt', 'private', 'ltd', 'limited', 'llp', 'llc', 'inc', 'incorporated', 'corp', 'corporation', 'capital', 'ventures?',
+  'partners', 'fund', 'investments?', 'holdings', 'group', 'technologies', 'tech', 'solutions', 'associates', 'bank',
+  'securities', 'advisors', 'advisory', 'enterprises?', 'industries', 'global', 'labs', 'equity', 'finance', 'financial',
+  'wealth', 'assets?', 'angels', 'network', 'family office', 'vc', 'trust', 'management', 'consulting', 'company', 'embassy',
+  'consulate', 'ministry', 'government', 'university', 'institute', 'college', 'school', 'academy', 'hospital', 'clinic',
+  'foundation', 'association', 'society', 'council', 'restaurant', 'hotel', 'studio', 'agency', 'media', 'entertainment',
+  'organi[sz]ation', 'federation', 'club', 'team', 'gmbh', 'ag', 'sarl', 'srl', 'bv', 'pty',
+  'pharma', 'motors', 'systems', 'services', 'traders', 'exports?', 'imports?'
+].join('|') + ')\\b', 'i');
+const addrRe = /\b(road|rd|street|st|str|strasse|straße|rue|via|calle|floor|flr|nagar|sector|lane|marg|tower|building|bldg|plot|block|avenue|ave|av|suite|park|complex|chowk|colony|opp|near|east|west|mumbai|delhi|bengaluru|bangalore|pune|hyderabad|chennai|kolkata|gurgaon|gurugram|noida|ahmedabad|india|usa|singapore|dubai|postfach|cedex)\b|\b\d{5,6}\b|\b\d{3} ?\d{3}\b/i;
+const PARTICLES = /^(de|da|di|du|del|della|van|von|der|den|bin|binti|al|el|la|le|y|e|of)$/i;
+
 function parseCard(text) {
-  const lines = text
-    .replace(/\s*[@©]\s*(?=[\w-]+\.)/g, '@')          // OCR: "name @ x.com" / "name©x.com"
-    .split('\n')
+  const lines = [];
+  for (let l of text.replace(/\s*[@©]\s*(?=[\w-]+\.)/g, '@').split('\n')) {    // OCR: "name @ x.com"
     // email/website lines: OCR adds spaces around dots ("siddharth. kinagi@x. com") and stray "_"
-    .map(l => /@|www\s*\./i.test(l) ? l.replace(/\s*([.@])\s*_?/g, '$1') : l)
-    .map(l => l.replace(/[|~`'"“”‘’«»*•·]+|_(?![\w.-]*@)/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter(l => /[a-z0-9]{2,}/i.test(l));
+    if (/@|www\s*\./i.test(l)) l = l.replace(/\s*([.@])\s*_?/g, '$1');
+    // "www thunders co kr" -> "www.thunders.co.kr" (short www line with spaces for dots)
+    if (/^\W*www\s+[a-z0-9-]+(\s+[a-z]{2,4}){1,2}\W*$/i.test(l.trim())) l = l.trim().replace(/\s+/g, '.');
+    l = l.replace(/[|~`'"“”‘’«»*•·]+|_(?![\w.-]*@)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!/[\p{L}0-9]{2,}/u.test(l)) continue;
+    // "MANAGING DIRECTOR, INTERNATIONAL MONETARY FUND" -> title line + company line
+    const parts = l.split(/\s*,\s*/);
+    if (parts.length === 2 && desigRe.test(parts[0]) && companyRe.test(parts[1]) && !companyRe.test(parts[0])) lines.push(...parts);
+    else lines.push(l);
+  }
 
   const all = lines.join('\n');
   const email = (all.match(/[\w.+-]+@[\w-]+(\.[a-z]{2,})+/i) || [''])[0].toLowerCase();
-  let website = ((all.replace(email, '').match(/\b(?:https?:\/\/)?(?:www\.[\w-]+(?:\.[a-z]{2,})+|[\w-]+\.(?:co\.in|com|in|co|net|org|io|vc|capital|ai|biz))\b/i) || [''])[0]).toLowerCase();
+  const webRe = new RegExp('(?:https?://)?(?:www\\.[\\w-]+(?:\\.[a-z]{2,})+|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:' + TLD + ')(?:\\.[a-z]{2})?\\b)', 'i');
+  let website = ((all.replace(email, '').match(webRe) || [''])[0]).toLowerCase();
 
   // "lgreenleaf.co.in" -> "www.greenleaf.co.in" when it ends with the email's domain (misread "www.")
   const domain = email.split('@')[1] || '';
@@ -19,24 +55,24 @@ function parseCard(text) {
 
   // Phones: per line so numbers on adjacent lines never merge; 10-13 digits
   const phones = [];
-  for (const l of lines) for (const m of l.match(/\+?\d[\d ().-]{7,}\d/g) || []) {
+  for (const l of lines) for (const m of l.match(/\+?\(?\d[\d ().-]{7,}\d/g) || []) {
     const digits = m.replace(/\D/g, '');
-    if (digits.length >= 10 && digits.length <= 13 && !/^\d{6}$/.test(digits)) phones.push(m.trim());
+    if (digits.length >= 10 && digits.length <= 13) phones.push(m.trim());
   }
 
-  const isContact = l => /@|www\.|https?:|\.(com|in|vc|co|net|org|io)\b/i.test(l) || l.replace(/\D/g, '').length >= 8;
-  const desigRe = /\b(ceo|cfo|cto|coo|cio|cmo|founder|co-?founder|director|partner|manager|president|vp|vice president|head|analyst|associate|principal|chairman|chairperson|md|managing|investor|advisor|adviser|consultant|officer|executive|lead|owner|proprietor|general partner|gp|venture|angel|engineer|marketing|strategy|product|sales|operations|business development|developer|designer|specialist|coordinator|representative|accountant|secretary|trustee|professor|scientist|architect|intern|supervisor|administrator|admin|hr)\b/i;
-  const companyRe = /\b(pvt|private|ltd|limited|llp|llc|inc|corp|corporation|capital|ventures|partners|fund|investments?|holdings|group|technologies|tech|solutions|associates|bank|securities|advisors|advisory|enterprises|industries|global|labs|equity|finance|financial|wealth|asset|assets|angels|network|family office|vc|ventures?|trust|management|consulting|company)\b/i;
-  const addrRe = /\b(road|rd|street|st|floor|flr|nagar|sector|lane|marg|tower|building|bldg|plot|block|avenue|ave|suite|park|complex|chowk|colony|opp|near|east|west|mumbai|delhi|bengaluru|bangalore|pune|hyderabad|chennai|kolkata|gurgaon|gurugram|noida|ahmedabad|india|usa|singapore|dubai)\b|\b\d{6}\b|\b\d{3} ?\d{3}\b/i;
-  const looksName = l => /^[A-Za-z][A-Za-z. ]+$/.test(l) && l.split(' ').length >= 2 && l.split(' ').length <= 4 && !desigRe.test(l) && !companyRe.test(l) && !addrRe.test(l);
-
+  const isContact = l => /@|www\.|https?:/i.test(l) || webRe.test(l) || l.replace(/\D/g, '').length >= 8;
+  // A name: 2-4 words of letters, each starting with a capital (or a lowercase particle like "de", "van")
+  const looksName = l => /^\p{Lu}[\p{L}.' -]+$/u.test(l) && l.split(' ').length >= 2 && l.split(' ').length <= 4
+    && l.split(' ').every((w, i) => /^\p{Lu}/u.test(w) || (i > 0 && PARTICLES.test(w)))
+    && !desigRe.test(l) && !companyRe.test(l) && !addrRe.test(l);
   const isDesig = l => desigRe.test(l) && !isContact(l) && !companyRe.test(l);
+  const plain = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
   // Name, strongest clue first: the email usually holds the person's name ("siddharth.kinagi@").
   // Background patterns and logos produce junk that can look like a name, so this beats position.
   const nameParts = (email.split('@')[0] || '').toLowerCase().split(/[._\-+0-9]+/).filter(p => p.length >= 3);
-  const byEmail = nameParts.length && lines.find(l => !isContact(l) && /^[A-Za-z][A-Za-z. ]+$/.test(l)
-    && l.split(' ').length <= 5 && nameParts.some(p => l.toLowerCase().split(/[ .]+/).includes(p)));
+  const byEmail = nameParts.length && lines.find(l => !isContact(l) && /^\p{L}[\p{L}. ]+$/u.test(l)
+    && l.split(' ').length <= 5 && nameParts.some(p => plain(l).split(/[ .]+/).includes(p)));
   let ni = byEmail ? lines.indexOf(byEmail) : -1;
 
   // Job title: the line right under the name; else one under any name-looking line; else the first match
@@ -44,11 +80,15 @@ function parseCard(text) {
   if (di < 0) di = lines.findIndex((l, i) => isDesig(l) && i > 0 && looksName(lines[i - 1]));
   if (di < 0) di = lines.findIndex(isDesig);
   const designation = di >= 0 ? lines[di] : '';
-  // Otherwise the name is right above the designation, or the first name-looking line
-  if (ni < 0) ni = di > 0 && looksName(lines[di - 1]) ? di - 1 : lines.findIndex(l => looksName(l) && !isContact(l));
+  // Otherwise the name sits next to the job title (1-2 lines above, or just below); else the first name-looking line
+  if (ni < 0 && di >= 0) ni = [di - 1, di - 2, di + 1].find(i => i >= 0 && i < lines.length && looksName(lines[i])) ?? -1;
+  if (ni < 0) ni = lines.findIndex(l => looksName(l) && !isContact(l));
   const name = ni >= 0 ? lines[ni] : '';
 
-  let company = lines.find(l => companyRe.test(l) && l !== designation && !isContact(l)) || '';
+  let ci = lines.findIndex(l => companyRe.test(l) && l !== designation && !isContact(l));
+  let company = ci >= 0 ? lines[ci] : '';
+  // "GROUP" / "LTD" alone on a line: the company name is on the line above ("BMW" + "GROUP")
+  if (ci > 0 && company.split(' ').every(w => companyRe.test(w)) && !isContact(lines[ci - 1]) && ci - 1 !== ni && ci - 1 !== di) company = lines[ci - 1] + ' ' + company;
   const companyGuess = !company && !!email;
   if (!company && email && !/@(gmail|yahoo|outlook|hotmail|rediffmail|icloud|live)\./.test(email)) {
     const d = email.split('@')[1].split('.')[0];
@@ -64,7 +104,7 @@ function parseCard(text) {
 
 // "RAHUL SHARMA" -> "Rahul Sharma"; leaves mixed case alone
 function titleCase(s) {
-  return s === s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : s;
+  return s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s.'-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : s;
 }
 
 // Find the card in a photo ({data,width,height} RGBA, same as canvas ImageData).
