@@ -65,53 +65,66 @@ function titleCase(s) {
   return s === s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : s;
 }
 
-// Find the card: the biggest bright, colourless (white/grey) blob in the photo.
+// Find the card in a photo ({data,width,height} RGBA, same as canvas ImageData).
+// Start from the biggest paper-white blob, then grow into neighbouring grey areas, so a part of
+// the card in shadow is kept (shadowed paper is grey; cloth/tables are coloured or dark).
 function findCard({ data, width: W, height: H }) {
   const C = 8;                                   // work on 8x8 pixel cells
-  const cw = Math.floor(W / C), ch = Math.floor(H / C);
-  const white = new Uint8Array(cw * ch);
+  const cw = Math.floor(W / C), ch = Math.floor(H / C), N = cw * ch;
+  const white = new Uint8Array(N), grey = new Uint8Array(N);
   for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
-    let n = 0;
+    let nw = 0, ng = 0;
     for (let y = cy * C; y < cy * C + C; y += 2) for (let x = cx * C; x < cx * C + C; x += 2) {
       const i = (y * W + x) * 4, r = data[i], g = data[i + 1], b = data[i + 2];
       const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-      if (mn > 165 && mx - mn < 40) n++;
+      if (mn > 165 && mx - mn < 40) nw++;
+      if (mn > 95 && mx - mn < 20) ng++;  // neutral grey only: beige cloth is excluded
     }
-    white[cy * cw + cx] = n >= 8 ? 1 : 0;        // >= half the samples are paper-white
+    white[cy * cw + cx] = nw >= 8 ? 1 : 0;       // >= half the samples are paper-white
+    grey[cy * cw + cx] = ng >= 8 ? 1 : 0;        // ... or paper in shadow
   }
-  // close small holes (text, logos) so the card is one blob: 2 rounds of dilation
-  let m = white;
-  for (let k = 0; k < 2; k++) {
-    const d = new Uint8Array(m.length);
-    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-      let v = 0;
-      for (let dy = -1; dy <= 1 && !v; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const yy = y + dy, xx = x + dx;
-        if (yy >= 0 && yy < ch && xx >= 0 && xx < cw && m[yy * cw + xx]) { v = 1; break; }
+  // close small holes (text, logos) so the card is one blob
+  const dilate = (m, times) => {
+    for (let k = 0; k < times; k++) {
+      const d = new Uint8Array(N);
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+        let v = 0;
+        for (let dy = -1; dy <= 1 && !v; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const yy = y + dy, xx = x + dx;
+          if (yy >= 0 && yy < ch && xx >= 0 && xx < cw && m[yy * cw + xx]) { v = 1; break; }
+        }
+        d[y * cw + x] = v;
       }
-      d[y * cw + x] = v;
+      m = d;
     }
-    m = d;
-  }
-  // largest connected blob
-  const seen = new Uint8Array(m.length); let best = null;
-  for (let s = 0; s < m.length; s++) {
-    if (!m[s] || seen[s]) continue;
-    const st = [s]; seen[s] = 1; let n = 0, x0 = cw, y0 = ch, x1 = 0, y1 = 0;
+    return m;
+  };
+  // flood fill from seed cells through cells allowed by mask; returns cell list
+  const fill = (seeds, mask, seen) => {
+    const st = [...seeds], out = [];
+    for (const s of seeds) seen[s] = 1;
     while (st.length) {
-      const p = st.pop(), x = p % cw, y = (p - x) / cw; n++;
-      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-      for (const q of [p - 1, p + 1, p - cw, p + cw]) {
-        if (q < 0 || q >= m.length || seen[q] || !m[q]) continue;
-        if ((q === p - 1 && x === 0) || (q === p + 1 && x === cw - 1)) continue;
+      const p = st.pop(), x = p % cw; out.push(p);
+      for (const q of [x > 0 ? p - 1 : -1, x < cw - 1 ? p + 1 : -1, p - cw, p + cw]) {
+        if (q < 0 || q >= N || seen[q] || !mask[q]) continue;
         seen[q] = 1; st.push(q);
       }
     }
-    if (!best || n > best.n) best = { n, x0, y0, x1, y1 };
+    return out;
+  };
+  const m = dilate(white, 2), seen = new Uint8Array(N);
+  let blob = null;
+  for (let s = 0; s < N; s++) {
+    if (!m[s] || seen[s]) continue;
+    const cells = fill([s], m, seen);
+    if (!blob || cells.length > blob.length) blob = cells;
   }
   // too small to be a card, or the whole photo is white: don't crop
-  if (!best || best.n < cw * ch * 0.06 || best.n > cw * ch * 0.92) return null;
-  return { x: best.x0 * C, y: best.y0 * C, w: (best.x1 - best.x0 + 1) * C, h: (best.y1 - best.y0 + 1) * C };
+  if (!blob || blob.length < N * 0.06 || blob.length > N * 0.92) return null;
+  const grown = fill(blob, dilate(grey, 1), new Uint8Array(N));
+  let x0 = cw, y0 = ch, x1 = 0, y1 = 0;
+  for (const p of grown) { const x = p % cw, y = (p - x) / cw; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return { x: x0 * C, y: y0 * C, w: (x1 - x0 + 1) * C, h: (y1 - y0 + 1) * C };
 }
 
 // How good is a reading? Found fields count most; confidence breaks ties.
