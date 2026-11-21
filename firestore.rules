@@ -1,18 +1,33 @@
 rules_version = '2';
 // Paste into Firebase console > Firestore Database > Rules > Publish.
-// The website can only ADD investor records. Nobody can read, edit or delete them from the
-// website; view them in the Firebase console.
+// - The scanner website can only ADD investor records (with small card images).
+// - Only admins can read them: a signed-in user whose UID has a document in the "admins"
+//   collection (create it by hand in the Firebase console, see README).
+// - Nobody can edit or delete records from the website; do that in the Firebase console.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     match /investors/{id} {
       allow create: if request.resource.data.keys().hasOnly(
-          ['name', 'designation', 'company', 'phone', 'email', 'website', 'address', 'notes', 'rawText', 'source', 'createdAt'])
+          ['name', 'designation', 'company', 'phone', 'email', 'website', 'address', 'notes',
+           'rawText', 'source', 'createdAt', 'frontImage', 'backImage'])
         && request.resource.data.createdAt == request.time
         && request.resource.data.name is string && request.resource.data.name.size() < 200
         && request.resource.data.notes is string && request.resource.data.notes.size() < 2000
         && request.resource.data.address is string && request.resource.data.address.size() < 1000
-        && request.resource.data.rawText is string && request.resource.data.rawText.size() < 5000;
-      allow read, update, delete: if false;
+        && request.resource.data.rawText is string && request.resource.data.rawText.size() < 5000
+        && request.resource.data.get('frontImage', '').size() < 400000
+        && request.resource.data.get('backImage', '').size() < 400000;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid; // lets the admin page check "am I an admin?"
+      allow write: if false;
     }
   }
 }

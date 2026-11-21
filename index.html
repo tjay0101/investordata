@@ -50,8 +50,16 @@
   .gallery { display: inline-block; margin-top: 12px; color: var(--deep); font-weight: 500; font-size: 14px; cursor: pointer; }
   .gallery:hover { text-decoration: underline; }
 
+  .back { margin-top: 16px; padding: 14px; border-radius: 18px; background: #f5f1ff; border: 1.5px dashed #b9a8ff; }
+  .back p { margin: 0 0 10px; font-size: 13px; color: #5b4bb7; font-weight: 500; }
+  .back-btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 14px; cursor: pointer; font: 600 15px Poppins, sans-serif; color: #fff; background: linear-gradient(135deg, var(--violet), #a35cff); box-shadow: 0 8px 18px rgba(123,92,255,.3); }
+  .thumbs { display: none; gap: 10px; margin-top: 16px; }
+  .thumbs figure { flex: 1; margin: 0; }
+  .thumbs img { width: 100%; height: 120px; object-fit: contain; border-radius: 12px; background: #f4f8fc; }
+  .thumbs figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .admin-link { text-align: center; margin: 22px 0 0; font-size: 12px; }
+  .admin-link a { color: var(--muted); }
   .tip { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
-  #preview { display: none; width: 100%; max-height: 220px; object-fit: contain; margin-top: 16px; border-radius: 14px; background: #f4f8fc; }
   .progress { display: none; height: 8px; margin-top: 14px; border-radius: 99px; background: #e6eef7; overflow: hidden; }
   .progress div { height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, var(--mint), var(--aqua), var(--violet)); transition: width .3s; }
   #status { margin-top: 10px; min-height: 20px; font-size: 14px; color: var(--muted); }
@@ -98,12 +106,22 @@
 
 <main>
   <section class="scan">
-    <label class="scan-btn" for="cam"><span class="ico">📸</span> Scan Visiting Card</label>
-    <input id="cam" type="file" accept="image/*" capture="environment" hidden>
+    <label class="scan-btn" for="cam"><span class="ico">📸</span> Scan Front of Card</label>
+    <input id="cam" type="file" accept="image/*" capture="environment" hidden data-side="front">
     <label class="gallery" for="pick">🖼️ or choose a photo from gallery</label>
-    <input id="pick" type="file" accept="image/*" hidden>
+    <input id="pick" type="file" accept="image/*" hidden data-side="front">
     <p class="tip">💡 For best results: card flat, fills the photo, good light, no shadow, hold steady.</p>
-    <img id="preview" alt="Scanned card">
+    <div class="thumbs" id="thumbs">
+      <figure><img id="frontImg" alt="Front of card"><figcaption>Front</figcaption></figure>
+      <figure id="backFig" hidden><img id="backImg" alt="Back of card"><figcaption>Back</figcaption></figure>
+    </div>
+    <div class="back" id="backBox" hidden>
+      <p>Some details on the back of the card?</p>
+      <label class="back-btn" for="camBack">🔄 Scan Back Side</label>
+      <input id="camBack" type="file" accept="image/*" capture="environment" hidden data-side="back">
+      <br><label class="gallery" for="pickBack">🖼️ back side from gallery</label>
+      <input id="pickBack" type="file" accept="image/*" hidden data-side="back">
+    </div>
     <div class="progress" id="progress"><div></div></div>
     <div id="status"></div>
   </section>
@@ -120,6 +138,7 @@
     <div class="field"><span class="chip c7">📍</span><label>Address<textarea name="address" rows="2" placeholder="Office address"></textarea></label></div>
     <div class="field"><span class="chip c8">📝</span><label>Notes<textarea name="notes" rows="2" placeholder="Met at…, interested in…"></textarea></label></div>
   </form>
+  <p class="admin-link"><a href="admin.html">🔒 Admin login</a></p>
 </main>
 
 <div class="bar"><div class="inner">
@@ -150,7 +169,7 @@
   const $ = id => document.getElementById(id);
   const form = $('form');
   const bar = $('progress').firstElementChild;
-  let rawText = '', source = '';
+  let source = '';
 
   // Free in-browser text reader. PSM 11 = "sparse text": best on cards in our tests.
   // Phones run low on memory after several big photos, so the reader is restarted every few
@@ -175,11 +194,64 @@
 
   const freeCanvas = c => { c.width = c.height = 0; }; // iPhones only free canvas memory this way
 
-  // 1. Fix phone rotation and find the white card in the photo (backgrounds like cloth/tables
-  //    confuse the reader), then cut it out at 1400px greyscale (tested best on real cards).
-  //    If no white card is found (dark card, or card fills the photo) the whole photo is used,
-  //    and dark images are flipped to dark-on-light.
-  async function prepImage(file) {
+  // Small colour copy of the photo to keep with the record (Firestore holds up to 1 MB per record)
+  function makeThumb(bmp) {
+    const c = document.createElement('canvas');
+    for (const [size, q] of [[900, .6], [700, .5], [500, .45]]) {
+      const s = Math.min(1, size / Math.max(bmp.width, bmp.height));
+      c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/jpeg', q);
+      if (url.length < 300000) { freeCanvas(c); return url; }
+    }
+    freeCanvas(c); return '';
+  }
+
+  // Greyscale copy of part of the photo (box in "look" coordinates, s = look scale) at 1400px;
+  // dark images are flipped to dark-on-light.
+  function cutOut(bmp, box, s) {
+    const t = 1400 / Math.max(box.w, box.h);
+    const c = document.createElement('canvas');
+    const w = c.width = Math.round(box.w * t), h = c.height = Math.round(box.h * t);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.filter = 'grayscale(1)';
+    ctx.drawImage(bmp, box.x / s, box.y / s, box.w / s, box.h / s, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    let sum = 0, n = 0;
+    for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
+    if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
+    return c;
+  }
+
+  function rotated(src, deg) {
+    if (!deg) return src;
+    const c = document.createElement('canvas'), side = deg % 180 !== 0;
+    c.width = side ? src.height : src.width; c.height = side ? src.width : src.height;
+    const ctx = c.getContext('2d');
+    ctx.translate(c.width / 2, c.height / 2); ctx.rotate(deg * Math.PI / 180);
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    return c;
+  }
+
+  // Read one image in the given rotations; keep whichever reading finds the most details
+  async function readRotations(w, c, order, best) {
+    for (const deg of order) {
+      const r = rotated(c, deg);
+      try {
+        const { data } = await w.recognize(r);
+        const fields = parseCard(data.text), score = scoreReading(fields, data.confidence);
+        if (!best || score > best.score) best = { text: data.text, fields, score };
+        if (fields.email && fields.phone && fields.name) break; // good enough
+      } finally { if (r !== c) freeCanvas(r); }
+    }
+    return best;
+  }
+
+  // 1. Fix phone rotation, find the white card in the photo (cloth/table backgrounds confuse
+  //    the reader) and read only that. A tall cut-out is usually a sideways card.
+  // 2. If that finds neither email nor phone, read the whole photo in all 4 rotations.
+  async function readOnce(file) {
+    const w = await getWorker();
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
     try {
       const s = 2000 / Math.max(bmp.width, bmp.height);
@@ -194,62 +266,31 @@
       // A completely flat image means the phone gave us a blank canvas (out of memory), not a real photo
       if (hi - lo < 8) throw new Error('blank image');
 
-      const box = findCard(px) || { x: 0, y: 0, w: W, h: H };
-      const bw = Math.min(box.w, W - box.x), bh = Math.min(box.h, H - box.y);
-      const t = 1400 / Math.max(bw, bh);
-      const c = document.createElement('canvas');
-      const w = c.width = Math.round(bw * t), h = c.height = Math.round(bh * t);
-      const ctx = c.getContext('2d', { willReadFrequently: true });
-      ctx.filter = 'grayscale(1)';
-      ctx.drawImage(bmp, box.x / s, box.y / s, bw / s, bh / s, 0, 0, w, h);
-      const img = ctx.getImageData(0, 0, w, h), d = img.data;
-      let sum = 0, n = 0;
-      for (let y = Math.round(h * .3); y < h * .7; y += 4) for (let x = Math.round(w * .3); x < w * .7; x += 4) { sum += d[(y * w + x) * 4]; n++; }
-      if (sum / n < 110) { for (let i = 0; i < d.length; i += 4) d[i] = d[i + 1] = d[i + 2] = 255 - d[i]; ctx.putImageData(img, 0, 0); }
-      return c;
-    } finally { bmp.close(); } // free the full-size photo now
-  }
-
-  function rotated(src, deg) {
-    if (!deg) return src;
-    const c = document.createElement('canvas'), side = deg % 180 !== 0;
-    c.width = side ? src.height : src.width; c.height = side ? src.width : src.height;
-    const ctx = c.getContext('2d');
-    ctx.translate(c.width / 2, c.height / 2); ctx.rotate(deg * Math.PI / 180);
-    ctx.drawImage(src, -src.width / 2, -src.height / 2);
-    return c;
-  }
-
-  // 2. Read it. A tall cut-out is usually a card photographed sideways, so try the side
-  //    rotations first; keep whichever reading finds the most details.
-  async function readOnce(file) {
-    const w = await getWorker();
-    const c = await prepImage(file);
-    try {
-      const order = c.height > c.width * 1.15 ? [90, 270, 0] : [0, 180];
-      let best = null;
-      for (const deg of order) {
-        const r = rotated(c, deg);
-        try {
-          const { data } = await w.recognize(r);
-          const fields = parseCard(data.text), score = scoreReading(fields, data.confidence);
-          if (!best || score > best.score) best = { text: data.text, score };
-          if (fields.email && fields.phone && fields.name) break; // good enough
-        } finally { if (r !== c) freeCanvas(r); }
+      const thumb = makeThumb(bmp);
+      const whole = { x: 0, y: 0, w: W, h: H };
+      const box = findCard(px);
+      let c = cutOut(bmp, box ? { ...box, w: Math.min(box.w, W - box.x), h: Math.min(box.h, H - box.y) } : whole, s);
+      let best;
+      try { best = await readRotations(w, c, c.height > c.width * 1.15 ? [90, 270, 0] : [0, 180]); }
+      finally { freeCanvas(c); }
+      if (!best.fields.email && !best.fields.phone) {
+        $('status').textContent = '✨ Hard to read, trying harder…';
+        c = cutOut(bmp, whole, s);
+        try { best = await readRotations(w, c, [0, 90, 270, 180], best); }
+        finally { freeCanvas(c); }
       }
-      return best.text;
-    } finally { freeCanvas(c); scansOnWorker++; }
+      return { text: best.text, thumb };
+    } finally { bmp.close(); scansOnWorker++; } // free the full-size photo now
   }
 
   async function readCard(file) {
     onProgress = p => bar.style.width = Math.max(5, p * 100) + '%';
-    try { rawText = await readOnce(file); }
+    try { return await readOnce(file); }
     catch (err) { // low memory / crashed reader: start a fresh one and try once more
       console.warn('Scan failed, retrying with a fresh reader', err);
       await dropWorker();
-      rawText = await readOnce(file);
+      return await readOnce(file);
     }
-    return parseCard(rawText);
   }
 
   function toast(msg, type) {
@@ -262,23 +303,32 @@
   }
   form.addEventListener('input', markFilled);
 
+  // Front and back of the card are read separately. Back-side details only fill empty fields.
+  const sides = { front: null, back: null };
+
   async function scan(e) {
-    const file = e.target.files[0];
+    const file = e.target.files[0], side = e.target.dataset.side;
     e.target.value = '';
     if (!file) return;
-    if ($('preview').src.startsWith('blob:')) URL.revokeObjectURL($('preview').src); // free previous photo
-    $('preview').src = URL.createObjectURL(file);
-    $('preview').style.display = 'block';
     $('progress').style.display = 'block'; bar.style.width = '5%';
-    $('status').textContent = '✨ Reading card…';
-    rawText = '';
+    $('status').textContent = side === 'back' ? '✨ Reading back side…' : '✨ Reading card…';
     try {
-      const fields = await readCard(file); source = 'ocr';
-      for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
-      form.elements.notes.value = ''; // new card: don't carry over the last card's notes
+      const { text, thumb } = await readCard(file);
+      sides[side] = { text, thumb };
+      source = 'ocr';
+      showThumbs();
+      const fields = parseCard(text);
+      if (side === 'front') {
+        for (const k of FIELDS) form.elements[k].value = (fields[k] || '').trim();
+        form.elements.notes.value = ''; // new card: don't carry over the last card's notes
+        if (sides.back) mergeIn(parseCard(sides.back.text));
+      } else mergeIn(fields);
       markFilled();
+      $('backBox').hidden = false;
       const found = FIELDS.filter(k => fields[k]).length;
-      $('status').textContent = found ? `✅ Found ${found} details. Please check before saving.` : '⚠️ Couldn\'t read much. Try a sharper, well-lit photo.';
+      $('status').textContent = found
+        ? '✅ Found ' + found + ' details' + (side === 'back' ? ' on the back' : '') + '. Please check before saving.'
+        : "⚠️ Couldn't read this side clearly. Retake it closer, with the card filling the photo and good light, or type the details in.";
       form.scrollIntoView({ behavior: 'smooth' });
     } catch (err) {
       $('status').textContent = '❌ Could not read this photo. Please take it again' + (/blank|memory/i.test(err.message) ? ' (if it keeps failing, close and reopen the app)' : '') + '.';
@@ -286,17 +336,45 @@
       $('progress').style.display = 'none';
     }
   }
-  $('cam').onchange = scan;
-  $('pick').onchange = scan;
+
+  // Fill only empty fields; phone numbers are added to the list
+  function mergeIn(f) {
+    for (const k of FIELDS) {
+      const el = form.elements[k], v = (f[k] || '').trim();
+      if (!v) continue;
+      if (!el.value.trim()) el.value = v;
+      else if (k === 'phone') el.value = [...new Set([...el.value.split(' / '), ...v.split(' / ')])].join(' / ');
+    }
+  }
+
+  function showThumbs() {
+    $('thumbs').style.display = sides.front || sides.back ? 'flex' : 'none';
+    $('frontImg').src = sides.front?.thumb || '';
+    $('frontImg').parentElement.hidden = !sides.front;
+    $('backImg').src = sides.back?.thumb || '';
+    $('backFig').hidden = !sides.back;
+  }
+  for (const id of ['cam', 'pick', 'camBack', 'pickBack']) $(id).onchange = scan;
 
   form.onsubmit = async e => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form));
     if (!data.name && !data.phone && !data.email) return toast('Enter at least a name, phone or email', 'err');
     $('save').disabled = true; $('save').textContent = 'Saving…';
+    const rawText = [sides.front?.text, sides.back?.text].filter(Boolean).join('\n----- back -----\n').slice(0, 4900);
+    const record = { ...data, rawText, source: source || 'manual', createdAt: serverTimestamp(),
+      frontImage: sides.front?.thumb || '', backImage: sides.back?.thumb || '' };
     try {
-      await addDoc(collection(db, 'investors'), { ...data, rawText, source: source || 'manual', createdAt: serverTimestamp() });
-      toast('✅ Saved', 'ok');
+      try {
+        await addDoc(collection(db, 'investors'), record);
+        toast('✅ Saved', 'ok');
+      } catch (err) {
+        // Database rules not updated for images yet: never lose the details, save them without images
+        if (err.code !== 'permission-denied' || (!record.frontImage && !record.backImage)) throw err;
+        delete record.frontImage; delete record.backImage;
+        await addDoc(collection(db, 'investors'), record);
+        toast('✅ Saved (without card images: database rules need updating)', 'ok');
+      }
       resetAll();
     } catch (err) {
       toast('Not saved: ' + err.message, 'err');
@@ -306,8 +384,9 @@
   };
 
   function resetAll() {
-    form.reset(); markFilled(); rawText = ''; source = '';
-    $('preview').style.display = 'none'; $('status').textContent = '';
+    form.reset(); markFilled(); source = '';
+    sides.front = sides.back = null; showThumbs(); $('backBox').hidden = true;
+    $('status').textContent = '';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   $('reset').onclick = resetAll;
