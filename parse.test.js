@@ -93,4 +93,7 @@ assert.strictEqual(parseCard(`mobile: (34) 629 873 502`).phone, '(34) 629 873 50
 assert.strictEqual(parseCard(`Tim Shea@terra es`).email, 'tim.shea@terra.es');
 assert.strictEqual(parseCard(`E-Mail : jo@example.com`).email, 'jo@example.com'); // label before email untouched
 
+// 16. A second email's domain is not the website
+assert.strictEqual(parseCard(`Email: heath@puresounds.com.au\nheathwaller@hotmail.com`).website, '');
+
 console.log('ok');

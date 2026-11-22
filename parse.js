@@ -51,7 +51,8 @@ function parseCard(text) {
   const all = lines.join('\n');
   const email = (all.match(/[\w.+-]+@[\w-]+(\.[a-z]{2,})+/i) || [''])[0].toLowerCase();
   const webRe = new RegExp('(?:https?://)?(?:www\\.[\\w-]+(?:\\.[a-z]{2,})+|\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:' + TLD + ')(?:\\.[a-z]{2})?\\b)', 'i');
-  let website = ((all.replace(email, '').match(webRe) || [''])[0]).toLowerCase();
+  // (every email removed first, so "x@hotmail.com" on a card never becomes the website)
+  let website = ((all.replace(/[\w.+-]+@[\w.-]+/g, ' ').match(webRe) || [''])[0]).toLowerCase();
 
   // "lgreenleaf.co.in" -> "www.greenleaf.co.in" when it ends with the email's domain (misread "www.")
   const domain = email.split('@')[1] || '';
