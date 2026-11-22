@@ -156,7 +156,7 @@
 <script src="parse.js?v=10"></script><!-- bump v= when parse.js changes, so phones don't use a cached copy -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
-  import { getFirestore, collection, addDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+  import { getFirestore, collection, addDoc, serverTimestamp, getDoc, doc } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 
   // Public web config (safe to ship; access is controlled by Firestore rules, see firestore.rules)
   const app = initializeApp({
@@ -200,12 +200,11 @@
   const freeCanvas = c => { c.width = c.height = 0; }; // iPhones only free canvas memory this way
 
   // ---- AI reader (Google Gemini). Far more accurate than the free reader.
-  // The key is built in (owner's choice, so nobody has to paste it). It is PUBLIC: anyone who reads
-  // this code can use it. Credits are prepaid, so the most that can be lost is what is on the key.
-  // If Google disables it, the app falls back to the free reader; put a new key here (or a device
-  // can still use its own via "change key" / #key=...).
-  // ponytail: public key; move it behind a small server or Firebase AI Logic to keep it secret.
-  const BUILT_IN_AI_KEY = 'AQ.Ab8RN6INhfmTAdxN7dBxI8gjRbJtbfazF6zAezWrhew1mBvxog';
+  // The key comes from the Firebase database (document config/ai, field geminiKey), so every phone
+  // gets it automatically and it is never in this public code (a key put in the code on GitHub was
+  // disabled by Google within minutes). A device can still use its own key via #key=... .
+  // ponytail: anyone using the site could read the key from the database; move it behind a small
+  // server (or Firebase AI Logic) if that matters. Credits are prepaid, so the risk is capped.
   const AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash']; // tried in order if one is busy
   const AI_PROMPT = 'This photo shows a business / visiting card (it may be rotated, on a background, or one of several cards: use the main card). ' +
     'Read it exactly as printed. name: the person\'s full name. designation: job title. company: company / organisation name. ' +
@@ -217,7 +216,14 @@
     if (k) { localStorage.setItem('geminiKey', k.trim()); history.replaceState(null, '', location.pathname + location.search); }
     aiKey = localStorage.getItem('geminiKey') || '';
   } catch {}
-  aiKey = aiKey || BUILT_IN_AI_KEY;
+  const aiKeyReady = (async () => {
+    if (aiKey) return;
+    try {
+      const snap = await getDoc(doc(db, 'config', 'ai'));
+      aiKey = snap.exists() ? String(snap.data().geminiKey || '').trim() : '';
+    } catch (err) { console.warn('AI key not loaded from database:', err.message); }
+    showAIState();
+  })();
 
   async function readWithAI(bmp) {
     const c = document.createElement('canvas');
@@ -256,12 +262,12 @@
     el.className = 'ai ' + (aiKey ? 'on' : 'off');
     el.innerHTML = aiKey
       ? '🤖 AI reader is on' + (note ? ' · <span>' + note + '</span>' : '')
-      : '⚠️ AI reader is off on this device, so results are less accurate. <button type="button">Turn it on</button>';
+      : '⚠️ AI reader is not set up yet, so the free reader is used (less accurate). <button type="button">Enter key</button>';
     const btn = el.querySelector('button');
     if (btn) btn.onclick = () => {
       const k = prompt('Paste the Gemini API key. It is saved only on this device.', '');
       if (k === null) return;
-      aiKey = k.trim() || BUILT_IN_AI_KEY;
+      aiKey = k.trim();
       try { aiKey ? localStorage.setItem('geminiKey', aiKey) : localStorage.removeItem('geminiKey'); } catch {}
       showAIState();
       if (aiKey) toast('🤖 AI reader turned on', 'ok');
@@ -345,6 +351,7 @@
       if (hi - lo < 8) throw new Error('blank image');
 
       const thumb = makeThumb(bmp);
+      await Promise.race([aiKeyReady, new Promise(r => setTimeout(r, 5000))]); // key still loading on a slow network
       if (aiKey) {
         try {
           $('status').textContent = '🤖 AI is reading the card…'; bar.style.width = '50%';

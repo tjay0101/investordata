@@ -25,6 +25,13 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // App settings, e.g. config/ai { geminiKey } so every phone gets the AI key without pasting it.
+    // Readable by the scanner (anyone with the site); only admins can change it.
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /admins/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid; // lets the admin page check "am I an admin?"
       allow write: if false;

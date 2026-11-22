@@ -6,14 +6,19 @@ Scan an investor's visiting card with your phone → **Gemini AI** reads it (or 
 
 ## AI reader
 
-The AI reader is on for everyone automatically: the Gemini key is built into `index.html`
-(`BUILT_IN_AI_KEY`), so nobody has to paste anything.
+The AI reader is on for everyone automatically: every phone loads the Gemini key from the
+Firebase database, so nobody has to paste anything. **Never put the key in the code**: GitHub
+blocks it, and once it was published Google disabled the key within minutes.
 
-- **The key is public** (anyone who reads the code can use it). Credits are prepaid, so the most
-  that can be lost is what is left on the key. Restricting the key to websites
-  `tjay0101.github.io/*` in [Google AI Studio](https://aistudio.google.com/apikey) reduces misuse.
-- If the credits run out or Google disables the key, the app keeps working with the free reader
-  and shows "used backup reader". To fix: create a new key and replace `BUILT_IN_AI_KEY`.
+Set or change the key (Firebase console → **Firestore Database → Data**):
+collection `config` → document `ai` → field `geminiKey` (string) = your key from
+[Google AI Studio](https://aistudio.google.com/apikey). The latest [`firestore.rules`](firestore.rules)
+must be published so the app can read it.
+
+- Anyone using the site could read the key from the database. Credits are prepaid, so the most
+  that can be lost is what is left on them.
+- If the key is missing, wrong or out of credits, the app keeps working with the free reader and
+  says so under the scan button.
 
 Photo tips: card flat and filling the photo, good light, no shadow.
 
