@@ -329,7 +329,6 @@
   //    the reader) and read only that. A tall cut-out is usually a sideways card.
   // 2. If that finds neither email nor phone, read the whole photo in all 4 rotations.
   async function readOnce(file) {
-    const w = await getWorker();
     const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
     try {
       const s = 2000 / Math.max(bmp.width, bmp.height);
@@ -358,6 +357,8 @@
           $('status').textContent = '✨ Reading card (backup reader)…'; bar.style.width = '5%';
         }
       }
+      // Free reader only from here on (waiting for it earlier would delay the AI on first use)
+      const w = await getWorker();
       const whole = { x: 0, y: 0, w: W, h: H };
       const box = findCard(px);
       let c = cutOut(bmp, box ? { ...box, w: Math.min(box.w, W - box.x), h: Math.min(box.h, H - box.y) } : whole, s);
