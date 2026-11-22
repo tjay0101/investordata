@@ -29,7 +29,7 @@ Photo tips: card flat and filling the photo, good light, no shadow.
 
 ## Admin panel (see all saved cards)
 
-Open the **🔒 Admin login** link at the bottom of the scanner (or `/admin.html`). Admins see every saved card with its front/back photos, can search, and can download a CSV.
+Open the **🔒 Admin login** link at the bottom of the scanner (or `/admin.html`). Admins see every saved card with its front/back photos (with totals for today and the last 7 days), can search, sort, delete cards, download a CSV, and set the shared AI key (⚙️ AI key). Preview the design with made-up cards: `admin.html#demo`.
 
 One-time setup in the [Firebase console](https://console.firebase.google.com/project/investor-data-d3a33/):
 
