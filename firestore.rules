@@ -1,9 +1,9 @@
 rules_version = '2';
 // Paste into Firebase console > Firestore Database > Rules > Publish.
 // - The scanner website can only ADD investor records (with small card images).
-// - Only admins can read them: a signed-in user whose UID has a document in the "admins"
-//   collection (create it by hand in the Firebase console, see README).
-// - Nobody can edit or delete records from the website; do that in the Firebase console.
+// - Only admins can read and delete them: a signed-in user whose UID has a document in the
+//   "admins" collection (create it by hand in the Firebase console, see README).
+// - Nobody can edit records from the website.
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
@@ -21,8 +21,8 @@ service cloud.firestore {
         && request.resource.data.rawText is string && request.resource.data.rawText.size() < 5000
         && request.resource.data.get('frontImage', '').size() < 400000
         && request.resource.data.get('backImage', '').size() < 400000;
-      allow read: if isAdmin();
-      allow update, delete: if false;
+      allow read, delete: if isAdmin();
+      allow update: if false;
     }
 
     // App settings, e.g. config/ai { geminiKey } so every phone gets the AI key without pasting it.
