@@ -200,9 +200,12 @@
   const freeCanvas = c => { c.width = c.height = 0; }; // iPhones only free canvas memory this way
 
   // ---- AI reader (Google Gemini). Far more accurate than the free reader.
-  // The key is NOT in this public code: each device saves it once (tap "turn on", or open
-  // https://tjay0101.github.io/investordata/#key=YOUR_KEY ; the #part never reaches any server).
-  // ponytail: key lives in the device browser; move to a small server if many people need it.
+  // The key is built in (owner's choice, so nobody has to paste it). It is PUBLIC: anyone who reads
+  // this code can use it. Credits are prepaid, so the most that can be lost is what is on the key.
+  // If Google disables it, the app falls back to the free reader; put a new key here (or a device
+  // can still use its own via "change key" / #key=...).
+  // ponytail: public key; move it behind a small server or Firebase AI Logic to keep it secret.
+  const BUILT_IN_AI_KEY = 'AQ.Ab8RN6INhfmTAdxN7dBxI8gjRbJtbfazF6zAezWrhew1mBvxog';
   const AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash']; // tried in order if one is busy
   const AI_PROMPT = 'This photo shows a business / visiting card (it may be rotated, on a background, or one of several cards: use the main card). ' +
     'Read it exactly as printed. name: the person\'s full name. designation: job title. company: company / organisation name. ' +
@@ -214,6 +217,7 @@
     if (k) { localStorage.setItem('geminiKey', k.trim()); history.replaceState(null, '', location.pathname + location.search); }
     aiKey = localStorage.getItem('geminiKey') || '';
   } catch {}
+  aiKey = aiKey || BUILT_IN_AI_KEY;
 
   async function readWithAI(bmp) {
     const c = document.createElement('canvas');
@@ -251,12 +255,13 @@
     const el = $('aiState');
     el.className = 'ai ' + (aiKey ? 'on' : 'off');
     el.innerHTML = aiKey
-      ? '🤖 AI reader is on' + (note ? ' · <span>' + note + '</span>' : '') + ' · <button type="button">change key</button>'
+      ? '🤖 AI reader is on' + (note ? ' · <span>' + note + '</span>' : '')
       : '⚠️ AI reader is off on this device, so results are less accurate. <button type="button">Turn it on</button>';
-    el.querySelector('button').onclick = () => {
+    const btn = el.querySelector('button');
+    if (btn) btn.onclick = () => {
       const k = prompt('Paste the Gemini API key. It is saved only on this device.', '');
       if (k === null) return;
-      aiKey = k.trim();
+      aiKey = k.trim() || BUILT_IN_AI_KEY;
       try { aiKey ? localStorage.setItem('geminiKey', aiKey) : localStorage.removeItem('geminiKey'); } catch {}
       showAIState();
       if (aiKey) toast('🤖 AI reader turned on', 'ok');
