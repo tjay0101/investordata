@@ -2,9 +2,20 @@
 
 Live app: https://tjay0101.github.io/investordata/
 
-Scan an investor's visiting card with your phone → the free in-browser text reader (Tesseract) reads it → check/edit → **Save** → stored in **Firebase Firestore**. No AI, no API keys, no cost.
+Scan an investor's visiting card with your phone → **Gemini AI** reads it (or the free in-browser reader as a backup) → check/edit → **Save** → stored in **Firebase Firestore**.
 
-Photo quality matters most: card flat and filling the photo, good light, no shadow. Fancy/handwritten fonts may need typing in by hand.
+## Turn on the AI reader (once per phone)
+
+The AI reader is much more accurate. Its key is **not** in this public code; each phone saves it once:
+
+- In the app, tap **"Turn it on"** under the scan button and paste the Gemini key, **or**
+- Send the person this link privately (WhatsApp/email) and have them open it once:
+  `https://tjay0101.github.io/investordata/#key=YOUR_GEMINI_KEY`
+
+Without the key (or if the AI is busy) the app uses the free reader automatically and says so.
+Key and credits: [Google AI Studio](https://aistudio.google.com/apikey). Restrict the key to websites `tjay0101.github.io/*`.
+
+Photo tips: card flat and filling the photo, good light, no shadow.
 
 ## One-time Firebase setup (project `investor-data-d3a33`)
 
