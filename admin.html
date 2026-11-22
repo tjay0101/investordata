@@ -245,7 +245,7 @@
       { id: 'd3', name: 'Amit Verma', designation: 'Investment Director', company: 'Greenleaf Capital LLP', phone: '022 4567 8901', email: 'amit@example.net', website: 'greenleaf.example.in', source: 'ocr', at: new Date(now - 12 * day) },
       { id: 'd4', name: '', designation: '', company: 'Harbour Family Office', phone: '+91 91234 56789', notes: 'Typed in by hand', source: 'manual', at: new Date(now - 30 * day) },
     ];
-    render();
+    setTimeout(render); // after the helpers below are defined
   } else {
     onAuthStateChanged(auth, async user => {
       $('logout').hidden = $('settingsBtn').hidden = !user;
