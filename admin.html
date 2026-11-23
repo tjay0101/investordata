@@ -429,19 +429,43 @@
   });
 
   // ---------- AI key (shared with every phone through config/ai) ----------
+  // Ask Google whether a key works (one tiny request), so a dead key is never saved for every phone
+  async function testKey(key) {
+    try {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with OK' }] }] }), signal: AbortSignal.timeout(15000) });
+      if (res.ok) return { ok: true };
+      const out = await res.json().catch(() => ({}));
+      const m = out.error?.message || 'HTTP ' + res.status;
+      return { ok: false, why: /not valid|invalid/i.test(m) ? 'Google says this key is not valid (wrong, deleted or disabled).'
+        : /credit|quota|exhaust|billing/i.test(m) ? 'This key has no credits / quota left.'
+        : /permission|denied/i.test(m) ? 'This key is not allowed to use Gemini.' : m };
+    } catch (e) { return { ok: false, why: 'Could not reach Google (' + e.message + '). Check the internet connection.' }; }
+  }
+
   $('settingsBtn').onclick = async () => {
     $('keyInput').value = '';
-    $('keyState').textContent = 'Checking…';
+    $('keyState').textContent = 'Checking the saved key…';
     $('keyDlg').showModal();
+    if (DEMO) { $('keyState').textContent = '(demo preview)'; return; }
     try {
-      const s = DEMO ? null : await getDoc(doc(db, 'config', 'ai'));
-      $('keyState').textContent = s && s.exists() && s.data().geminiKey ? '🤖 AI reader is ON for all phones.' : '⚪ No key saved: phones use the free reader.';
+      const s = await getDoc(doc(db, 'config', 'ai'));
+      const saved = s.exists() ? String(s.data().geminiKey || '') : '';
+      if (!saved) { $('keyState').textContent = '⚪ No key saved: phones use the free reader.'; return; }
+      const t = await testKey(saved);
+      $('keyState').textContent = t.ok ? '✅ AI reader is ON and working for all phones.' : '❌ A key is saved but does NOT work: ' + t.why + ' Paste a working key below.';
     } catch { $('keyState').textContent = ''; }
   };
   $('keyDlg').addEventListener('close', async () => {
     if ($('keyDlg').returnValue !== 'ok' || DEMO) return;
     const key = $('keyInput').value.trim();
     try {
+      if (key) {
+        toast('Checking the key with Google…', 'ok');
+        const t = await testKey(key);
+        if (!t.ok) return toast('Not saved. ' + t.why, 'err');
+      }
       await setDoc(doc(db, 'config', 'ai'), { geminiKey: key });
       toast(key ? '🤖 AI key saved: all phones now use AI' : 'AI switched off', 'ok');
     } catch (err) {
