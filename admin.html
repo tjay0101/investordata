@@ -94,8 +94,10 @@
   .notes { margin: 10px 16px 0; background: #fff8e6; border-radius: 12px; padding: 8px 10px; font-size: 12.5px; }
   .imgs { display: flex; gap: 8px; padding: 12px 16px 0; }
   .imgs img { flex: 1; min-width: 0; height: 96px; object-fit: cover; border-radius: 12px; cursor: zoom-in; background: #f4f8fc; border: 1px solid var(--line); }
-  .foot { margin-top: auto; padding: 12px 16px 14px; display: flex; align-items: center; gap: 8px; }
-  .when { font-size: 11.5px; color: var(--muted); flex: 1; }
+  .foot { margin-top: auto; padding: 12px 16px 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .when { font-size: 11.5px; color: var(--muted); flex: 1 1 auto; }
+  .act.edit { background: #e7f0ff; color: var(--deep); }
+  .act.edit:hover { background: var(--deep); color: #fff; }
   .act { border: 0; cursor: pointer; border-radius: 11px; padding: 7px 11px; font: 600 12.5px Poppins, sans-serif; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
   .act.wa { background: #e3f9f1; color: #0f8a66; }
   .act.del { background: #ffecec; color: var(--red); }
@@ -113,6 +115,13 @@
   .dlg h3 { margin: 0 0 6px; font-size: 18px; }
   .dlg p { margin: 0 0 4px; color: var(--muted); font-size: 14px; }
   .dlg .btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  #editDlg { max-width: min(640px, 94vw); width: 100%; }
+  .eg { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .eg .full { grid-column: 1 / -1; }
+  textarea { display: block; width: 100%; margin-top: 4px; padding: 10px 13px; border: 1.5px solid var(--line); border-radius: 12px;
+    font: 14px Poppins, sans-serif; color: var(--ink); background: #fbfdff; resize: vertical; }
+  textarea:focus { outline: none; border-color: var(--aqua); box-shadow: 0 0 0 4px rgba(27,161,226,.15); background: #fff; }
+  @media (max-width: 560px) { .eg { grid-template-columns: 1fr; } }
   #zoom { max-width: 95vw; background: #000; }
   #zoom img { display: block; max-width: 95vw; max-height: 90vh; }
 
@@ -127,8 +136,10 @@
     .grid { grid-template-columns: 1fr; }
     .stat { padding: 12px; gap: 10px; } .stat .ico { width: 38px; height: 38px; font-size: 18px; } .stat b { font-size: 20px; }
     .who { display: none; }
-    .tools select, .tools .btn { flex: 1; }
+    .tools select, .tools .btn { flex: 1 1 0; min-width: 0; }
+    .tools .btn { padding: 11px 10px; }
   }
+  .tools .btn { white-space: nowrap; } /* keep "Download CSV" on one line */
   @media (prefers-reduced-motion: reduce) { .rec, .skel { transition: none; animation: none; } }
 </style>
 </head>
@@ -178,6 +189,22 @@
   </section>
 </main>
 
+<dialog id="editDlg"><form method="dialog" class="dlg" id="editForm">
+  <h3>✏️ Edit card</h3>
+  <p>Correct anything the scanner got wrong.</p>
+  <div class="eg">
+    <label>👤 Name<input name="name" maxlength="190"></label>
+    <label>💼 Designation<input name="designation" maxlength="300"></label>
+    <label>🏢 Company<input name="company" maxlength="300"></label>
+    <label>📞 Phone<input name="phone" type="tel" maxlength="300"></label>
+    <label>✉️ Email<input name="email" maxlength="300" inputmode="email"></label>
+    <label>🌐 Website<input name="website" maxlength="300" inputmode="url"></label>
+    <label class="full">📍 Address<textarea name="address" rows="2" maxlength="990"></textarea></label>
+    <label class="full">📝 Notes<textarea name="notes" rows="3" maxlength="1990"></textarea></label>
+  </div>
+  <div class="btns"><button class="btn light" value="cancel" formnovalidate>Cancel</button><button class="btn" value="ok">💾 Save changes</button></div>
+</form></dialog>
+
 <dialog id="delDlg"><form method="dialog" class="dlg">
   <h3>🗑️ Delete this card?</h3>
   <p id="delName"></p>
@@ -199,7 +226,7 @@
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
   import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js';
-  import { getFirestore, collection, getDocs, getDoc, setDoc, deleteDoc, doc, query, orderBy } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+  import { getFirestore, collection, getDocs, getDoc, setDoc, deleteDoc, updateDoc, doc, query, orderBy } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 
   // Same public web config as the scanner; access is controlled by firestore.rules
   const app = initializeApp({
@@ -331,6 +358,7 @@
         ${imgs.length ? `<div class="imgs">${imgs.map(u => `<img src="${u}" alt="Card photo" loading="lazy">`).join('')}</div>` : ''}
         <div class="foot"><span class="when">${esc(when(r.at))}</span>
           ${ps.length ? `<a class="act wa" href="${esc(waHref(ps[0]))}" target="_blank" rel="noopener noreferrer">💬 WhatsApp</a>` : ''}
+          <button class="act edit" data-edit="${esc(r.id)}">✏️ Edit</button>
           <button class="act del" data-del="${esc(r.id)}">🗑️ Delete</button></div>
       </article>`;
     }).join('');
@@ -343,8 +371,39 @@
     if (e.target.tagName === 'IMG') { $('zoomImg').src = e.target.src; $('zoom').showModal(); }
     const id = e.target.closest('[data-del]')?.dataset.del;
     if (id) askDelete(id);
+    const eid = e.target.closest('[data-edit]')?.dataset.edit;
+    if (eid) openEdit(eid);
   });
   $('zoom').onclick = () => $('zoom').close();
+
+  // ---------- Edit ----------
+  const EDITABLE = ['name', 'designation', 'company', 'phone', 'email', 'website', 'address', 'notes'];
+  let editing = null;
+  function openEdit(id) {
+    const r = records.find(x => x.id === id); if (!r) return;
+    editing = r;
+    const f = $('editForm');
+    for (const k of EDITABLE) f.elements[k].value = r[k] || '';
+    $('editDlg').showModal();
+  }
+  $('editDlg').addEventListener('close', async () => {
+    const r = editing; editing = null;
+    if ($('editDlg').returnValue !== 'ok' || !r) return;
+    const f = $('editForm'), changes = {};
+    for (const k of EDITABLE) {
+      const v = f.elements[k].value.replace(/[ \t]+/g, ' ').trim();
+      if (v !== (r[k] || '')) changes[k] = k === 'email' ? v.toLowerCase() : v;
+    }
+    if (!Object.keys(changes).length) return toast('No changes', 'ok');
+    try {
+      if (!DEMO) await updateDoc(doc(db, 'investors', r.id), changes);
+      Object.assign(r, changes);
+      render();
+      toast('✅ Card updated', 'ok');
+    } catch (err) {
+      toast(err.code === 'permission-denied' ? 'Not allowed: publish the latest database rules (see README)' : 'Could not save: ' + err.message, 'err');
+    }
+  });
 
   // ---------- Delete ----------
   let pendingDelete = null;
